@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با تفکیک سشن، حذف آیدی ثابت و غیرفعال‌سازی Persistence)
+# web_app.py (نسخه نهایی با تفکیک سشن، حذف آیدی ثابت و رفع خطای session.sid)
 
 import os
 import logging
@@ -7,13 +7,14 @@ from typing import Dict, List, Optional, Any
 
 # --- 🚀 وابستگی‌های اضافی ---
 from dotenv import load_dotenv
+import uuid # 👈🏻 اضافه شد: برای ساخت Session ID یکتا
 
 # --- 🧠 وابستگی‌های جیمینای ---
 from google import genai
 from google.genai import types
 
 # --- 🌐 وابستگی‌های وب (مترجم) ---
-from flask import Flask, request, jsonify, session # 👈🏻 اضافه کردن session
+from flask import Flask, request, jsonify, session # 👈🏻 session حتماً باید ایمپورت شود
 from flask_cors import CORS 
 
 # 👈🏻 لود کردن متغیرهای محیطی
@@ -32,10 +33,7 @@ GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI
 
 
 # --- ⚙️ تنظیمات کلی ربات (شخصیت‌های شما) ---
-CONFIG_FILE = "bot_config.json"
-PERSONAS_FILE = "personas.json"
-
-# ❌ USER_ID_FOR_WEB حذف شد. از session.sid برای تفکیک کاربران استفاده می‌شود. 
+# CONFIG_FILE و PERSONAS_FILE به دلیل حذف Persistence دیگر استفاده نمی‌شوند.
 
 # 🚨🚨🚨 لیست کامل شخصیت‌های شما (همان لیست ثابت)
 DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
@@ -105,9 +103,11 @@ DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
     },
 }
 
-# 👈🏻 پیکربندی‌ها مستقیماً از پیش‌فرض استفاده می‌شوند و از فایل خوانده نمی‌شوند.
+# 👈🏻 پیکربندی‌ها مستقیماً از پیش‌فرض استفاده می‌شوند.
 persona_configs: Dict[str, Dict[str, str]] = DEFAULT_PERSONA_CONFIGS 
+# user_personas و user_names حذف شدند.
 chat_sessions: Dict[str, Any] = {} # 👈🏻 کلیدها از str (Session ID) هستند
+
 
 # --- 🧠 کلاس و توابع جیمینای ---
 
@@ -115,7 +115,7 @@ GEMINI_MODEL = 'gemini-2.5-flash'
 
 class GeminiClient:
     """کلاس Wrapper برای مدیریت کلاینت و سشن‌های چت Gemini."""
-    
+    # ... (بدون تغییر) ...
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key) 
         self._model_name = GEMINI_MODEL 
@@ -153,8 +153,19 @@ def get_gemini_client() -> Optional['GeminiClient']:
         logger.error(f"❌ Failed to initialize Gemini Client: {e}")
         return None
 
-# --- 💾 توابع Persistence (ذخیره‌سازی و بارگذاری) ---
-# ❌ توابع load_personas_from_file و save_personas_to_file حذف شدند.
+# --- 💾 توابع Session Management ---
+
+def get_session_id() -> str:
+    """Gets the unique session ID from the Flask session, creating it if necessary.
+    
+    NOTE: Using a custom key ('session_id') instead of session.sid to ensure 
+    compatibility with default Flask SecureCookieSession without external session managers.
+    """
+    if 'session_id' not in session:
+        # ساخت یک UUID یکتا برای این سشن و ذخیره آن
+        session['session_id'] = str(uuid.uuid4())
+    return session['session_id']
+
 
 def create_new_chat_session(session_id: str, current_persona_key: str, active_user_name: Optional[str]) -> Any:
     """ساخت سشن چت جدید با دستورالعمل سیستم به‌روز شده."""
@@ -175,9 +186,8 @@ def create_new_chat_session(session_id: str, current_persona_key: str, active_us
     chat = GEMINI_CLIENT.create_chat(
         system_instruction=system_instruction
     )
-    # 👈🏻 استفاده از session_id به جای user_id
     chat_sessions[session_id] = chat
-    logger.info(f"Chat session for {session_id} created/reset. Persona: {current_persona_key}, Name: {active_user_name}")
+    logger.info(f"Chat session for {session_id[:8]}... created/reset. Persona: {current_persona_key}, Name: {active_user_name}")
     return chat
     
     
@@ -232,7 +242,7 @@ def set_user_name_endpoint():
     data = request.get_json()
     user_name = data.get('user_name', '').strip()
     
-    session_id = session.sid # 👈🏻 استفاده از Session ID
+    session_id = get_session_id() # ✅ استفاده از تابع کمکی جدید
 
     # 1. ذخیره نام جدید در session Flask
     session['user_name'] = user_name
@@ -242,7 +252,7 @@ def set_user_name_endpoint():
         del chat_sessions[session_id]
     
     # 3. ساخت سشن جدید با نام جدید
-    current_persona_key = session.get("persona_key", "default") # 👈🏻 بازیابی شخصیت فعلی از سشن
+    current_persona_key = session.get("persona_key", "default") 
     create_new_chat_session(session_id, current_persona_key, user_name)
     
     if user_name:
@@ -266,7 +276,7 @@ def set_persona_endpoint():
     if not persona_key or persona_key not in persona_configs:
         return jsonify({'error': 'کلید شخصیت نامعتبر است.'}), 400
         
-    session_id = session.sid # 👈🏻 استفاده از Session ID
+    session_id = get_session_id() # ✅ استفاده از تابع کمکی جدید
     
     # 1. به‌روزرسانی شخصیت در session Flask
     session['persona_key'] = persona_key
@@ -279,7 +289,7 @@ def set_persona_endpoint():
     active_user_name = session.get("user_name")
     create_new_chat_session(session_id, persona_key, active_user_name)
         
-    logger.info(f"Persona for web session ({session_id}) set to: {persona_key}. Name: {active_user_name}")
+    logger.info(f"Persona for web session ({session_id[:8]}...) set to: {persona_key}. Name: {active_user_name}")
     
     return jsonify({
         'status': 'success',
@@ -302,7 +312,7 @@ def chat_endpoint():
     if not user_message:
         return jsonify({'response': 'لطفاً پیامی ارسال کنید.'}), 400
 
-    session_id = session.sid # 👈🏻 استفاده از Session ID
+    session_id = get_session_id() # ✅ استفاده از تابع کمکی جدید
     
     # 👈🏻 سشن چت مربوط به این session_id را می‌گیریم (یا می‌سازیم).
     chat = get_chat_session(session_id) 
@@ -333,9 +343,4 @@ def serve_index():
 # --- 🚀 تابع اصلی برای اجرا ---
 # -----------------------------------------------
 
-# ❌ خط load_personas_from_file() حذف شد.
-
-# ❌❌❌ خطوط اجرای لوکال برای رفع خطای Render حذف شدند ❌❌❌
-# if __name__ == '__main__':
-#     # این فقط برای اجرای لوکال است
-#     app.run(host='0.0.0.0', port=5000, debug=True)
+# نیازی به load_personas_from_file() نیست زیرا از DEFAULT_PERSONA_CONFIGS استفاده می‌کنیم.
