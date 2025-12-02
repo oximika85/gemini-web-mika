@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با قابلیت نام کاربر و رفع خطای پورت Render)
+# web_app.py (نسخه نهایی با رفع باگ‌های نام کاربر و ریست سشن)
 
 import os
 import logging
@@ -108,7 +108,7 @@ DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
 
 persona_configs: Dict[str, Dict[str, str]] = {}  
 user_personas: Dict[int, str] = {}
-user_names: Dict[int, str] = {} # 👈🏻 جدید: برای ذخیره نام کاربر
+user_names: Dict[int, str] = {} # 👈🏻 برای ذخیره نام کاربر
 chat_sessions: Dict[int, Any] = {}
 
 # --- 🧠 کلاس و توابع جیمینای ---
@@ -166,7 +166,6 @@ def load_personas_from_file():
         try:
             with open(PERSONAS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # 💡 اگر فایل هست، فقط user_personas و user_names را از آن می‌خوانیم
                 user_personas = {int(k): v for k, v in data.get("user_personas", {}).items() if str(k).isdigit()}
         except Exception as e:
             logger.error(f"خطا در خواندن فایل {PERSONAS_FILE} (احتمالاً JSON خراب): {e}")
@@ -175,26 +174,13 @@ def load_personas_from_file():
         user_personas = {}
 
 
-def get_chat_session(user_id: int, user_name: Optional[str] = None) -> Any: # 👈🏻 اضافه کردن user_name
-    """ساخت یا برگرداندن سشن چت بر اساس شخصیت ذخیره شده برای کاربر."""
+def create_new_chat_session(user_id: int, current_persona_key: str, active_user_name: Optional[str]) -> Any:
+    """ساخت سشن چت جدید با دستورالعمل سیستم به‌روز شده."""
     global GEMINI_CLIENT
-    if GEMINI_CLIENT is None:
-        GEMINI_CLIENT = get_gemini_client()
-        
-    if not GEMINI_CLIENT:
-        return None
-        
-    # 1. تعیین کلید شخصیت فعلی و دستورالعمل اصلی
-    current_persona_key = user_personas.get(user_id, "default") 
-    base_system_instruction = persona_configs.get(current_persona_key, persona_configs["default"])["prompt"]
 
-    # 2. اضافه کردن دستورالعمل نام کاربر
-    # 🚨 اگر نام جدیدی ارسال شده، آن را ذخیره و سشن را ریست می‌کنیم.
-    if user_name:
-        user_names[user_id] = user_name # ذخیره نام جدید
+    base_system_instruction = persona_configs.get(current_persona_key, persona_configs["default"])["prompt"]
     
-    # 3. ساخت دستورالعمل نهایی
-    active_user_name = user_names.get(user_id)
+    # 1. ساخت دستورالعمل نهایی
     if active_user_name:
         system_instruction = (
             base_system_instruction + 
@@ -202,17 +188,30 @@ def get_chat_session(user_id: int, user_name: Optional[str] = None) -> Any: # �
         )
     else:
         system_instruction = base_system_instruction
+
+    # 2. ساخت سشن جدید
+    chat = GEMINI_CLIENT.create_chat(
+        system_instruction=system_instruction
+    )
+    chat_sessions[user_id] = chat
+    logger.info(f"Chat session for {user_id} created/reset. Persona: {current_persona_key}, Name: {active_user_name}")
+    return chat
+    
+    
+def get_chat_session(user_id: int) -> Any: 
+    """برگرداندن سشن چت موجود یا ساختن سشن جدید در صورت عدم وجود."""
+    global GEMINI_CLIENT
+    if GEMINI_CLIENT is None:
+        GEMINI_CLIENT = get_gemini_client()
         
-    # 4. بررسی نیاز به ساخت یا ریست سشن
-    
-    # اگر سشن موجود نیست یا نام کاربری تغییر کرده یا شخصیت عوض شده است، سشن را ریست می‌کنیم.
-    needs_reset = (user_id not in chat_sessions)
-    
-    if needs_reset:
-        chat_sessions[user_id] = GEMINI_CLIENT.create_chat(
-            system_instruction=system_instruction
-        )
-        logger.info(f"Chat session for {user_id} reset/created. Persona: {current_persona_key}, Name: {active_user_name}")
+    if not GEMINI_CLIENT:
+        return None
+        
+    # اگر سشن موجود نیست، آن را می‌سازیم.
+    if user_id not in chat_sessions:
+        current_persona_key = user_personas.get(user_id, "default") 
+        active_user_name = user_names.get(user_id)
+        return create_new_chat_session(user_id, current_persona_key, active_user_name)
         
     # در غیر این صورت، سشن موجود را برمی‌گردانیم.
     return chat_sessions[user_id]
@@ -225,7 +224,7 @@ def get_chat_session(user_id: int, user_name: Optional[str] = None) -> Any: # �
 app = Flask(__name__, static_folder='.', static_url_path='') 
 CORS(app) 
 
-# --- 🟢 درگاه‌های انتخاب شخصیت ---
+# --- 🟢 درگاه‌های انتخاب شخصیت و نام ---
 
 @app.route('/api/personas', methods=['GET'])
 def get_personas_endpoint():
@@ -237,13 +236,44 @@ def get_personas_endpoint():
     ]
     return jsonify({"personas": persona_list})
 
+
+@app.route('/api/set_user_name', methods=['POST'])
+def set_user_name_endpoint():
+    """تنظیم نام کاربر و ریست کردن سشن برای اعمال در پرامپت."""
+    
+    data = request.get_json()
+    user_name = data.get('user_name', '').strip()
+    
+    global user_names, chat_sessions
+    
+    # 1. ذخیره نام جدید
+    user_names[USER_ID_FOR_WEB] = user_name
+    
+    # 2. ریست کردن سشن (برای اعمال نام جدید در System Instruction)
+    if USER_ID_FOR_WEB in chat_sessions:
+        del chat_sessions[USER_ID_FOR_WEB]
+    
+    # 3. ساخت سشن جدید با نام جدید
+    current_persona_key = user_personas.get(USER_ID_FOR_WEB, "default") 
+    create_new_chat_session(USER_ID_FOR_WEB, current_persona_key, user_name)
+    
+    if user_name:
+        message = f"✅ نام شما با موفقیت به **{user_name}** ثبت شد. چت ریست شد."
+    else:
+        message = "✅ نام کاربر پاک شد. چت ریست شد."
+
+    return jsonify({
+        'status': 'success',
+        'message': message
+    })
+
+
 @app.route('/api/set_persona', methods=['POST'])
 def set_persona_endpoint():
     """تغییر شخصیت کاربر ثابت وب و ریست کردن سشن چت."""
     
     data = request.get_json()
     persona_key = data.get('persona_key')
-    user_name = data.get('user_name') # 👈🏻 گرفتن نام کاربر 
     
     if not persona_key or persona_key not in persona_configs:
         return jsonify({'error': 'کلید شخصیت نامعتبر است.'}), 400
@@ -252,23 +282,20 @@ def set_persona_endpoint():
     
     # 1. به‌روزرسانی شخصیت برای آیدی ثابت وب
     user_personas[USER_ID_FOR_WEB] = persona_key
-    
-    # 2. ذخیره نام کاربر
-    if user_name:
-        user_names[USER_ID_FOR_WEB] = user_name
         
-    # 3. ریست کردن سشن چت (با تغییر شخصیت، تاریخچه پاک می‌شود و سشن جدید با دستورالعمل جدید ساخته می‌شود.)
+    # 2. ریست کردن سشن چت (با تغییر شخصیت، سشن جدید با دستورالعمل جدید ساخته می‌شود.)
     if USER_ID_FOR_WEB in chat_sessions:
         del chat_sessions[USER_ID_FOR_WEB]
     
-    # 4. فراخوانی get_chat_session برای ساخت سشن جدید با نام جدید
-    get_chat_session(USER_ID_FOR_WEB, user_name=user_name)
+    # 3. ساخت سشن جدید با شخصیت جدید (نام موجود حفظ می‌شود)
+    active_user_name = user_names.get(USER_ID_FOR_WEB)
+    create_new_chat_session(USER_ID_FOR_WEB, persona_key, active_user_name)
         
-    logger.info(f"Persona for web user (ID {USER_ID_FOR_WEB}) set to: {persona_key}. Name: {user_name}")
+    logger.info(f"Persona for web user (ID {USER_ID_FOR_WEB}) set to: {persona_key}. Name: {active_user_name}")
     
     return jsonify({
         'status': 'success',
-        'message': f"شخصیت با موفقیت به '{persona_configs[persona_key].get('name', persona_key)}' تغییر کرد. چت ریست شد.",
+        'message': f"شخصیت با موفقیت به **{persona_configs[persona_key].get('name', persona_key)}** تغییر کرد. چت ریست شد.",
         'new_persona_name': persona_configs[persona_key].get('name', persona_key)
     })
 
@@ -283,13 +310,12 @@ def chat_endpoint():
 
     data = request.get_json()
     user_message = data.get('message')
-    user_name = data.get('user_name') # 👈🏻 گرفتن نام کاربر
     
     if not user_message:
         return jsonify({'response': 'لطفاً پیامی ارسال کنید.'}), 400
 
-    # 👈🏻 ارسال نام کاربر به تابع get_chat_session. اگر نامی ارسال شود، سشن ریست می‌شود.
-    chat = get_chat_session(USER_ID_FOR_WEB, user_name=user_name) 
+    # 👈🏻 فقط سشن موجود را می‌گیریم. (نام کاربر باید با set_user_name یا set_persona ست شده باشد.)
+    chat = get_chat_session(USER_ID_FOR_WEB) 
     
     if not chat:
         return jsonify({'response': '❌ خطای اتصال به Gemini.'}), 500
