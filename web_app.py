@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با رفع باگ‌های نام کاربر و ریست سشن)
+# web_app.py (نسخه نهایی با تفکیک سشن، حذف آیدی ثابت و غیرفعال‌سازی Persistence)
 
 import os
 import logging
@@ -13,7 +13,7 @@ from google import genai
 from google.genai import types
 
 # --- 🌐 وابستگی‌های وب (مترجم) ---
-from flask import Flask, request, jsonify 
+from flask import Flask, request, jsonify, session # 👈🏻 اضافه کردن session
 from flask_cors import CORS 
 
 # 👈🏻 لود کردن متغیرهای محیطی
@@ -35,8 +35,7 @@ GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI
 CONFIG_FILE = "bot_config.json"
 PERSONAS_FILE = "personas.json"
 
-# 💡 آیدی ثابت برای تمام کاربران وب (این آیدی، شخصیت مشترک را تعیین می‌کند)
-USER_ID_FOR_WEB = 9999999 
+# ❌ USER_ID_FOR_WEB حذف شد. از session.sid برای تفکیک کاربران استفاده می‌شود. 
 
 # 🚨🚨🚨 لیست کامل شخصیت‌های شما (همان لیست ثابت)
 DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
@@ -106,10 +105,9 @@ DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
     },
 }
 
-persona_configs: Dict[str, Dict[str, str]] = {}  
-user_personas: Dict[int, str] = {}
-user_names: Dict[int, str] = {} # 👈🏻 برای ذخیره نام کاربر
-chat_sessions: Dict[int, Any] = {}
+# 👈🏻 پیکربندی‌ها مستقیماً از پیش‌فرض استفاده می‌شوند و از فایل خوانده نمی‌شوند.
+persona_configs: Dict[str, Dict[str, str]] = DEFAULT_PERSONA_CONFIGS 
+chat_sessions: Dict[str, Any] = {} # 👈🏻 کلیدها از str (Session ID) هستند
 
 # --- 🧠 کلاس و توابع جیمینای ---
 
@@ -156,25 +154,9 @@ def get_gemini_client() -> Optional['GeminiClient']:
         return None
 
 # --- 💾 توابع Persistence (ذخیره‌سازی و بارگذاری) ---
-def load_personas_from_file():
-    global persona_configs, user_personas
-    
-    # 🟢 FIX: تضمین می‌کنیم که persona_configs همیشه با لیست پیش‌فرض شما پر شود.
-    persona_configs.update(DEFAULT_PERSONA_CONFIGS)
-    
-    if os.path.exists(PERSONAS_FILE):
-        try:
-            with open(PERSONAS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                user_personas = {int(k): v for k, v in data.get("user_personas", {}).items() if str(k).isdigit()}
-        except Exception as e:
-            logger.error(f"خطا در خواندن فایل {PERSONAS_FILE} (احتمالاً JSON خراب): {e}")
-            user_personas = {}
-    else:
-        user_personas = {}
+# ❌ توابع load_personas_from_file و save_personas_to_file حذف شدند.
 
-
-def create_new_chat_session(user_id: int, current_persona_key: str, active_user_name: Optional[str]) -> Any:
+def create_new_chat_session(session_id: str, current_persona_key: str, active_user_name: Optional[str]) -> Any:
     """ساخت سشن چت جدید با دستورالعمل سیستم به‌روز شده."""
     global GEMINI_CLIENT
 
@@ -193,12 +175,13 @@ def create_new_chat_session(user_id: int, current_persona_key: str, active_user_
     chat = GEMINI_CLIENT.create_chat(
         system_instruction=system_instruction
     )
-    chat_sessions[user_id] = chat
-    logger.info(f"Chat session for {user_id} created/reset. Persona: {current_persona_key}, Name: {active_user_name}")
+    # 👈🏻 استفاده از session_id به جای user_id
+    chat_sessions[session_id] = chat
+    logger.info(f"Chat session for {session_id} created/reset. Persona: {current_persona_key}, Name: {active_user_name}")
     return chat
     
     
-def get_chat_session(user_id: int) -> Any: 
+def get_chat_session(session_id: str) -> Any: 
     """برگرداندن سشن چت موجود یا ساختن سشن جدید در صورت عدم وجود."""
     global GEMINI_CLIENT
     if GEMINI_CLIENT is None:
@@ -207,14 +190,15 @@ def get_chat_session(user_id: int) -> Any:
     if not GEMINI_CLIENT:
         return None
         
-    # اگر سشن موجود نیست، آن را می‌سازیم.
-    if user_id not in chat_sessions:
-        current_persona_key = user_personas.get(user_id, "default") 
-        active_user_name = user_names.get(user_id)
-        return create_new_chat_session(user_id, current_persona_key, active_user_name)
+    # 👈🏻 اگر سشن موجود نیست، آن را می‌سازیم.
+    if session_id not in chat_sessions:
+        # 👈🏻 بازیابی از session Flask
+        current_persona_key = session.get("persona_key", "default") 
+        active_user_name = session.get("user_name")
+        return create_new_chat_session(session_id, current_persona_key, active_user_name)
         
     # در غیر این صورت، سشن موجود را برمی‌گردانیم.
-    return chat_sessions[user_id]
+    return chat_sessions[session_id]
 
 
 # -----------------------------------------------
@@ -223,6 +207,10 @@ def get_chat_session(user_id: int) -> Any:
 
 app = Flask(__name__, static_folder='.', static_url_path='') 
 CORS(app) 
+
+# 🚨🚨🚨 اضافه کردن SECRET_KEY برای کارکرد session 🚨🚨🚨
+# این کلید باید در محیط پروداکشن به صورت امن از متغیر محیطی خوانده شود.
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or 'a_very_secret_key_for_session_management_999'
 
 # --- 🟢 درگاه‌های انتخاب شخصیت و نام ---
 
@@ -244,18 +232,18 @@ def set_user_name_endpoint():
     data = request.get_json()
     user_name = data.get('user_name', '').strip()
     
-    global user_names, chat_sessions
+    session_id = session.sid # 👈🏻 استفاده از Session ID
+
+    # 1. ذخیره نام جدید در session Flask
+    session['user_name'] = user_name
     
-    # 1. ذخیره نام جدید
-    user_names[USER_ID_FOR_WEB] = user_name
-    
-    # 2. ریست کردن سشن (برای اعمال نام جدید در System Instruction)
-    if USER_ID_FOR_WEB in chat_sessions:
-        del chat_sessions[USER_ID_FOR_WEB]
+    # 2. ریست کردن سشن چت
+    if session_id in chat_sessions:
+        del chat_sessions[session_id]
     
     # 3. ساخت سشن جدید با نام جدید
-    current_persona_key = user_personas.get(USER_ID_FOR_WEB, "default") 
-    create_new_chat_session(USER_ID_FOR_WEB, current_persona_key, user_name)
+    current_persona_key = session.get("persona_key", "default") # 👈🏻 بازیابی شخصیت فعلی از سشن
+    create_new_chat_session(session_id, current_persona_key, user_name)
     
     if user_name:
         message = f"✅ نام شما با موفقیت به **{user_name}** ثبت شد. چت ریست شد."
@@ -278,20 +266,20 @@ def set_persona_endpoint():
     if not persona_key or persona_key not in persona_configs:
         return jsonify({'error': 'کلید شخصیت نامعتبر است.'}), 400
         
-    global user_personas, chat_sessions, user_names
+    session_id = session.sid # 👈🏻 استفاده از Session ID
     
-    # 1. به‌روزرسانی شخصیت برای آیدی ثابت وب
-    user_personas[USER_ID_FOR_WEB] = persona_key
+    # 1. به‌روزرسانی شخصیت در session Flask
+    session['persona_key'] = persona_key
         
-    # 2. ریست کردن سشن چت (با تغییر شخصیت، سشن جدید با دستورالعمل جدید ساخته می‌شود.)
-    if USER_ID_FOR_WEB in chat_sessions:
-        del chat_sessions[USER_ID_FOR_WEB]
+    # 2. ریست کردن سشن چت 
+    if session_id in chat_sessions:
+        del chat_sessions[session_id]
     
-    # 3. ساخت سشن جدید با شخصیت جدید (نام موجود حفظ می‌شود)
-    active_user_name = user_names.get(USER_ID_FOR_WEB)
-    create_new_chat_session(USER_ID_FOR_WEB, persona_key, active_user_name)
+    # 3. ساخت سشن جدید با شخصیت جدید (نام موجود از سشن حفظ می‌شود)
+    active_user_name = session.get("user_name")
+    create_new_chat_session(session_id, persona_key, active_user_name)
         
-    logger.info(f"Persona for web user (ID {USER_ID_FOR_WEB}) set to: {persona_key}. Name: {active_user_name}")
+    logger.info(f"Persona for web session ({session_id}) set to: {persona_key}. Name: {active_user_name}")
     
     return jsonify({
         'status': 'success',
@@ -314,8 +302,10 @@ def chat_endpoint():
     if not user_message:
         return jsonify({'response': 'لطفاً پیامی ارسال کنید.'}), 400
 
-    # 👈🏻 فقط سشن موجود را می‌گیریم. (نام کاربر باید با set_user_name یا set_persona ست شده باشد.)
-    chat = get_chat_session(USER_ID_FOR_WEB) 
+    session_id = session.sid # 👈🏻 استفاده از Session ID
+    
+    # 👈🏻 سشن چت مربوط به این session_id را می‌گیریم (یا می‌سازیم).
+    chat = get_chat_session(session_id) 
     
     if not chat:
         return jsonify({'response': '❌ خطای اتصال به Gemini.'}), 500
@@ -343,8 +333,7 @@ def serve_index():
 # --- 🚀 تابع اصلی برای اجرا ---
 # -----------------------------------------------
 
-# 🟢 این خط تضمین می‌کند که Gunicorn شخصیت‌ها را لود کند.
-load_personas_from_file()
+# ❌ خط load_personas_from_file() حذف شد.
 
 # ❌❌❌ خطوط اجرای لوکال برای رفع خطای Render حذف شدند ❌❌❌
 # if __name__ == '__main__':
