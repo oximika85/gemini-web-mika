@@ -1,9 +1,8 @@
-# web_app.py (نسخه نهایی و رفع اشکال شده)
+# web_app.py (نسخه نهایی و تضمین شده)
 
 import os
 import logging
 import json
-# 🟢 رفع اشکال: اضافه شدن این خط برای حل خطای NameError: name 'Dict'
 from typing import Dict, List, Optional, Any 
 
 # --- 🚀 وابستگی‌های اضافی ---
@@ -39,7 +38,7 @@ PERSONAS_FILE = "personas.json"
 # 💡 آیدی ثابت برای تمام کاربران وب (این آیدی، شخصیت مشترک را تعیین می‌کند)
 USER_ID_FOR_WEB = 9999999 
 
-# 🚨🚨🚨 لیست کامل شخصیت‌های شما
+# 🚨🚨🚨 لیست کامل شخصیت‌های شما (همان لیست ثابت)
 DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
     "default": {
         "name": "دستیار حرفه‌ای (اطلس) 🤖",
@@ -157,19 +156,22 @@ def get_gemini_client() -> Optional['GeminiClient']:
 # --- 💾 توابع Persistence (ذخیره‌سازی و بارگذاری) ---
 def load_personas_from_file():
     global persona_configs, user_personas
+    
+    # 🟢 FIX: تضمین می‌کنیم که persona_configs همیشه با لیست پیش‌فرض شما پر شود.
+    persona_configs.update(DEFAULT_PERSONA_CONFIGS)
+    
     if os.path.exists(PERSONAS_FILE):
         try:
             with open(PERSONAS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                persona_configs.update(data.get("persona_configs", DEFAULT_PERSONA_CONFIGS))
+                # 💡 اگر فایل هست، فقط user_personas را از آن می‌خوانیم
                 user_personas = {int(k): v for k, v in data.get("user_personas", {}).items() if str(k).isdigit()}
         except Exception as e:
-            logger.error(f"خطا در خواندن فایل {PERSONAS_FILE}. استفاده از تنظیمات پیش‌فرض داخلی: {e}")
-            persona_configs.update(DEFAULT_PERSONA_CONFIGS)
+            logger.error(f"خطا در خواندن فایل {PERSONAS_FILE} (احتمالاً JSON خراب): {e}")
             user_personas = {}
     else:
-        persona_configs.update(DEFAULT_PERSONA_CONFIGS)
         user_personas = {}
+
 
 def get_chat_session(user_id: int) -> Any:
     """ساخت یا برگرداندن سشن چت بر اساس شخصیت ذخیره شده برای کاربر."""
@@ -180,7 +182,6 @@ def get_chat_session(user_id: int) -> Any:
     if not GEMINI_CLIENT:
         return None
         
-    # 💡 نکته: اگر کاربر وب (آیدی ثابت) سشن چت نداشته باشد، می‌سازیم.
     if user_id not in chat_sessions:
         current_persona_key = user_personas.get(user_id, "default") 
         
@@ -191,7 +192,6 @@ def get_chat_session(user_id: int) -> Any:
         elif "default" in persona_configs:
              system_instruction = persona_configs["default"]["prompt"]
         
-        # ساخت سشن جدید با دستورات سیستم (شخصیت)
         chat_sessions[user_id] = GEMINI_CLIENT.create_chat(
             system_instruction=system_instruction
         )
@@ -286,6 +286,9 @@ def serve_index():
 # --- 🚀 تابع اصلی برای اجرا ---
 # -----------------------------------------------
 
+# 🟢 این خط تضمین می‌کند که Gunicorn شخصیت‌ها را لود کند.
+load_personas_from_file()
+
 if __name__ == '__main__':
-    load_personas_from_file()
+    # این فقط برای اجرای محلی است
     app.run(host='0.0.0.0', port=5000, debug=True)
