@@ -2,11 +2,17 @@
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>چت‌بات ساده Gemini</title>
+    <title>چت‌بات با قابلیت انتخاب شخصیت</title>
     <style>
-        /* CSS ساده */
+        /* CSS ساده (بیشتر از قبل) */
         body { font-family: Tahoma, sans-serif; background-color: #f4f4f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .chat-container { width: 400px; height: 600px; background: white; box-shadow: 0 0 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; border-radius: 8px; overflow: hidden; }
+        
+        /* استایل‌های جدید برای انتخابگر شخصیت */
+        .header-container { padding: 10px; border-bottom: 1px solid #ddd; background-color: #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+        #personaSelector { padding: 8px; border-radius: 5px; border: 1px solid #ccc; flex-grow: 1; margin-left: 10px; }
+        .header-container button { padding: 8px 12px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
+        
         .chat-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column-reverse; }
         .message { margin-bottom: 10px; padding: 10px 15px; border-radius: 20px; max-width: 80%; }
         .user-message { background-color: #007bff; color: white; align-self: flex-start; margin-right: auto; }
@@ -19,8 +25,14 @@
 <body>
 
 <div class="chat-container">
+    <div class="header-container">
+        <select id="personaSelector" title="انتخاب شخصیت"></select>
+        <button onclick="setPersona()">تغییر شخصیت</button>
+    </div>
+
     <div class="chat-box" id="chatBox">
         </div>
+    
     <div class="input-container">
         <input type="text" id="userInput" placeholder="پیام خود را بنویسید..." autofocus>
         <button onclick="sendMessage()">ارسال</button>
@@ -30,8 +42,9 @@
 <script>
     const chatBox = document.getElementById('chatBox');
     const userInput = document.getElementById('userInput');
-    
-    // وقتی کاربر Enter می‌زند
+    const personaSelector = document.getElementById('personaSelector');
+
+    // --- توابع UI اصلی ---
     userInput.addEventListener('keypress', function(event) {
         if (event.key === 'Enter') {
             sendMessage();
@@ -47,34 +60,78 @@
         chatBox.insertBefore(messageDiv, chatBox.firstChild);
     }
     
+    function clearChat() {
+        chatBox.innerHTML = '';
+        appendMessage("شخصیت تغییر کرد! چت جدید با هوش مصنوعی شروع شد.", 'bot');
+    }
+
+    // --- توابع API ---
+
+    async function loadPersonas() {
+        try {
+            const response = await fetch('/api/personas');
+            const data = await response.json();
+            
+            if (data.personas) {
+                personaSelector.innerHTML = ''; // پاک کردن گزینه‌های قبلی
+                data.personas.forEach(p => {
+                    const option = document.createElement('option');
+                    option.value = p.key;
+                    option.textContent = p.name;
+                    personaSelector.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading personas:', error);
+            // پیام خطا در کنسول
+        }
+    }
+
+    async function setPersona() {
+        const selectedKey = personaSelector.value;
+        if (!selectedKey) return;
+
+        try {
+            const response = await fetch('/api/set_persona', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ persona_key: selectedKey })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                // اگر تغییر موفق بود، چت را ریست می‌کنیم.
+                clearChat(); 
+                appendMessage(`✅ ${data.message}`, 'bot');
+            } else {
+                appendMessage(`❌ خطا در تغییر شخصیت: ${data.error}`, 'bot');
+            }
+        } catch (error) {
+            appendMessage('خطا در اتصال به سرور برای تغییر شخصیت.', 'bot');
+        }
+    }
+
     async function sendMessage() {
         const message = userInput.value.trim();
         if (message === "") return;
 
-        // 1. نمایش پیام کاربر
         appendMessage(message, 'user');
         userInput.value = '';
         
-        // 2. ساخت پیام Loading
         appendMessage('...', 'bot'); 
         
-        // 3. ارسال به API
         try {
-            // 💡 نکته: /api/chat همان آدرسی است که در web_app.py تعریف کردیم.
             const response = await fetch('/api/chat', { 
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: message })
             });
 
             const data = await response.json();
             
-            // 4. حذف پیام Loading
-            chatBox.removeChild(chatBox.firstChild);
+            chatBox.removeChild(chatBox.firstChild); // حذف Loading
             
-            // 5. نمایش پاسخ
             if (data.response) {
                 appendMessage(data.response, 'bot');
             } else {
@@ -87,8 +144,12 @@
         }
     }
     
-    // پیام خوش‌آمدگویی اولیه
-    appendMessage("سلام! من نسخه وب همان ربات تلگرام شما هستم.", 'bot');
+    // --- اجرای اولیه ---
+    loadPersonas().then(() => {
+        // بعد از لود شدن شخصیت‌ها، پیام خوش‌آمدگویی را نمایش می‌دهیم.
+        appendMessage("سلام! شخصیت مورد نظر خود را از منوی بالا انتخاب کنید.", 'bot');
+    });
+
 </script>
 </body>
 </html>
