@@ -4,34 +4,171 @@
     <meta charset="UTF-8">
     <title>چت‌بات با قابلیت انتخاب شخصیت</title>
     <style>
-        /* CSS ساده (بیشتر از قبل) */
-        body { font-family: Tahoma, sans-serif; background-color: #f4f4f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .chat-container { width: 400px; height: 600px; background: white; box-shadow: 0 0 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; border-radius: 8px; overflow: hidden; }
+        /* CSS با Liquid Glass Effect و انیمیشن نرم */
+        body { 
+            font-family: Tahoma, sans-serif; 
+            background: linear-gradient(135deg, #74EBD5 0%, #9FACE6 100%); /* گرادیانت ملایم */
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            margin: 0; 
+            transition: background 0.5s ease;
+        }
+        
+        .chat-container { 
+            width: 420px; 
+            height: 650px; 
+            background: rgba(255, 255, 255, 0.2); /* پس‌زمینه شفاف */
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37); 
+            backdrop-filter: blur(10px); /* جلوه Liquid Glass */
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 15px; 
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+            transition: all 0.5s ease;
+        }
         
         /* استایل‌های جدید برای انتخابگر شخصیت */
-        .header-container { padding: 10px; border-bottom: 1px solid #ddd; background-color: #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
-        #personaSelector { padding: 8px; border-radius: 5px; border: 1px solid #ccc; flex-grow: 1; margin-left: 10px; }
-        .header-container button { padding: 8px 12px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
+        .header-container { 
+            padding: 15px; 
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3); 
+            background: rgba(255, 255, 255, 0.1); 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
         
-        .chat-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column-reverse; }
-        .message { margin-bottom: 10px; padding: 10px 15px; border-radius: 20px; max-width: 80%; }
-        .user-message { background-color: #007bff; color: white; align-self: flex-start; margin-right: auto; }
-        .bot-message { background-color: #e2e2e2; color: #333; align-self: flex-end; margin-left: auto; }
-        .input-container { display: flex; padding: 10px; border-top: 1px solid #ddd; }
-        .input-container input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; margin-left: 10px; text-align: right;}
-        .input-container button { padding: 10px 15px; border: none; background-color: #28a745; color: white; border-radius: 20px; cursor: pointer; }
+        .header-container input, #personaSelector { 
+            padding: 8px; 
+            border-radius: 8px; 
+            border: 1px solid rgba(255, 255, 255, 0.5); 
+            background: rgba(255, 255, 255, 0.3);
+            flex-grow: 1; 
+            margin-left: 10px; 
+            color: #333;
+            transition: all 0.3s ease;
+        }
+        
+        .header-container button { 
+            padding: 8px 12px; 
+            border: none; 
+            background-color: #007bff; 
+            color: white; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            transition: background-color 0.3s ease, transform 0.1s;
+        }
+        .header-container button:hover { background-color: #0056b3; }
+        .header-container button:active { transform: scale(0.98); }
+
+        /* انیمیشن نرم برای پیام‌ها */
+        @keyframes slideInFromBottom {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .chat-box { 
+            flex-grow: 1; 
+            padding: 20px; 
+            overflow-y: auto; 
+            display: flex; 
+            flex-direction: column-reverse; 
+        }
+        
+        .message { 
+            margin-bottom: 15px; 
+            padding: 12px 18px; 
+            border-radius: 25px; 
+            max-width: 75%; 
+            transition: background-color 0.3s ease;
+            animation: slideInFromBottom 0.4s ease-out; /* انیمیشن نرم‌تر */
+        }
+        
+        .user-message { 
+            background-color: #007bff; 
+            color: white; 
+            align-self: flex-start; 
+            margin-right: auto; 
+            border-bottom-right-radius: 5px; 
+        }
+        .bot-message { 
+            background-color: #e9ecef; 
+            color: #333; 
+            align-self: flex-end; 
+            margin-left: auto; 
+            border-bottom-left-radius: 5px; 
+        }
+        
+        /* استایل لودینگ نقطه‌ای نرم */
+        .loading-dots {
+            background-color: #ced4da !important;
+        }
+        .loading-dots::after {
+            content: '.';
+            animation: loading 1.5s infinite;
+            display: inline-block;
+            overflow: hidden;
+            width: 30px; /* فضای ثابت برای جلوگیری از پرش متن */
+            text-align: left;
+        }
+        @keyframes loading {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+            100% { content: '.'; }
+        }
+
+        .input-container { 
+            display: flex; 
+            padding: 15px; 
+            border-top: 1px solid rgba(255, 255, 255, 0.3); 
+            background: rgba(255, 255, 255, 0.1); 
+        }
+        
+        .input-container input { 
+            flex-grow: 1; 
+            padding: 12px; 
+            border: 1px solid #ccc; 
+            border-radius: 25px; 
+            margin-left: 10px; 
+            text-align: right;
+            background: white;
+            transition: border-color 0.3s ease;
+        }
+        .input-container input:focus {
+            border-color: #28a745;
+            box-shadow: 0 0 8px rgba(40, 167, 69, 0.2);
+            outline: none;
+        }
+        
+        .input-container button { 
+            padding: 10px 20px; 
+            border: none; 
+            background-color: #28a745; 
+            color: white; 
+            border-radius: 25px; 
+            cursor: pointer; 
+            transition: background-color 0.3s ease, transform 0.1s;
+        }
+        .input-container button:hover { background-color: #1e7e34; }
+        .input-container button:active { transform: scale(0.98); }
     </style>
 </head>
 <body>
 
 <div class="chat-container">
     <div class="header-container">
+        <input type="text" id="userNameInput" placeholder="نام شما" style="width: 100px; margin-right: 10px; flex-grow: 0;">
+        
         <select id="personaSelector" title="انتخاب شخصیت"></select>
         <button onclick="setPersona()">تغییر شخصیت</button>
     </div>
 
     <div class="chat-box" id="chatBox">
-        </div>
+    </div>
     
     <div class="input-container">
         <input type="text" id="userInput" placeholder="پیام خود را بنویسید..." autofocus>
@@ -43,6 +180,7 @@
     const chatBox = document.getElementById('chatBox');
     const userInput = document.getElementById('userInput');
     const personaSelector = document.getElementById('personaSelector');
+    const userNameInput = document.getElementById('userNameInput'); // 👈🏻 نام کاربر
 
     // --- توابع UI اصلی ---
     userInput.addEventListener('keypress', function(event) {
@@ -50,14 +188,35 @@
             sendMessage();
         }
     });
+
+    // 🚨 FIX XSS: تابع ایمن‌سازی HTML
+    function escapeHTML(str) {
+        if (!str) return '';
+        return str.replace(/[&<>"']/g, function(m) {
+            return {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            }[m];
+        });
+    }
     
-    function appendMessage(text, sender) {
+    function appendMessage(text, sender, isLoading = false) { // 👈🏻 اضافه شدن isLoading
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message');
         messageDiv.classList.add(sender + '-message');
-        messageDiv.textContent = text;
+        
+        messageDiv.innerHTML = escapeHTML(text);
+        
+        if (isLoading) {
+            messageDiv.classList.add('loading-dots');
+            messageDiv.textContent = ''; 
+        }
         
         chatBox.insertBefore(messageDiv, chatBox.firstChild);
+        return messageDiv; // برگرداندن المان
     }
     
     function clearChat() {
@@ -73,7 +232,7 @@
             const data = await response.json();
             
             if (data.personas) {
-                personaSelector.innerHTML = ''; // پاک کردن گزینه‌های قبلی
+                personaSelector.innerHTML = ''; 
                 data.personas.forEach(p => {
                     const option = document.createElement('option');
                     option.value = p.key;
@@ -83,25 +242,27 @@
             }
         } catch (error) {
             console.error('Error loading personas:', error);
-            // پیام خطا در کنسول
         }
     }
 
     async function setPersona() {
         const selectedKey = personaSelector.value;
+        const userName = userNameInput.value.trim(); // 👈🏻 گرفتن نام
         if (!selectedKey) return;
 
         try {
             const response = await fetch('/api/set_persona', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ persona_key: selectedKey })
+                body: JSON.stringify({ 
+                    persona_key: selectedKey,
+                    user_name: userName // 👈🏻 ارسال نام هنگام تغییر شخصیت
+                })
             });
 
             const data = await response.json();
 
             if (data.status === 'success') {
-                // اگر تغییر موفق بود، چت را ریست می‌کنیم.
                 clearChat(); 
                 appendMessage(`✅ ${data.message}`, 'bot');
             } else {
@@ -119,18 +280,22 @@
         appendMessage(message, 'user');
         userInput.value = '';
         
-        appendMessage('...', 'bot'); 
+        const userName = userNameInput.value.trim(); // 👈🏻 گرفتن نام کاربر برای ارسال
+        const loadingMessage = appendMessage('', 'bot', true); 
         
         try {
             const response = await fetch('/api/chat', { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: message })
+                body: JSON.stringify({ 
+                    message: message,
+                    user_name: userName // 👈🏻 ارسال نام کاربر
+                })
             });
 
             const data = await response.json();
             
-            chatBox.removeChild(chatBox.firstChild); // حذف Loading
+            chatBox.removeChild(loadingMessage); 
             
             if (data.response) {
                 appendMessage(data.response, 'bot');
@@ -139,15 +304,14 @@
             }
 
         } catch (error) {
-            chatBox.removeChild(chatBox.firstChild); 
+            chatBox.removeChild(loadingMessage); 
             appendMessage('خطا در اتصال به سرور.', 'bot');
         }
     }
     
     // --- اجرای اولیه ---
     loadPersonas().then(() => {
-        // بعد از لود شدن شخصیت‌ها، پیام خوش‌آمدگویی را نمایش می‌دهیم.
-        appendMessage("سلام! شخصیت مورد نظر خود را از منوی بالا انتخاب کنید.", 'bot');
+        appendMessage("سلام! شخصیت مورد نظر خود را از منوی بالا انتخاب کنید. اگر می‌خواهید با اسم شما را صدا بزنم، نام خود را در فیلد کناری وارد کنید.", 'bot');
     });
 
 </script>
