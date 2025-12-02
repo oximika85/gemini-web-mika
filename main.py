@@ -42,8 +42,10 @@ BOT_TOKEN: str = os.getenv("BOT_TOKEN", os.getenv("TELEGRAM_TOKEN", "YOUR_TELEGR
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINIAPIKEY")
 
 admin_id_str = os.getenv("ADMIN_USER_ID", "")
-# 💡 فیکس: تبدیل مطمئن ADMIN_USER_ID به لیست اعداد صحیح
 ADMIN_IDS: List[int] = [int(i.strip()) for i in admin_id_str.split(',') if i.strip().isdigit()]
+
+# 🟢 متغیر جدید برای کانال لاگ
+LOG_CHANNEL_ID: Optional[str] = os.getenv("LOG_CHANNEL_ID") 
 
 
 # ⚠️ اگر کلید جیمینای موجود نباشد، ربات اجرا نخواهد شد.
@@ -56,32 +58,34 @@ if not GEMINI_API_KEY:
 # 🛎️ توابع کمکی و اصلی
 # ---------------------------------------------------------------------
 
-# 🟢 تابع notify_admin_of_message (اصلاح شده برای اشکال‌زدایی)
-async def notify_admin_of_message(message: str, context: ContextTypes.DEFAULT_TYPE, chat_id: Optional[int] = None) -> None:
-    """ارسال پیام نظارتی به تمام ادمین‌های لیست شده."""
-    if not ADMIN_IDS:
-        logger.warning("ADMIN_USER_ID تنظیم نشده است.")
+# 🟢 تابع notify_admin_of_message (اصلاح شده برای کانال و رفع خطای فرمت)
+async def notify_admin_of_message(message: str, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """ارسال پیام نظارتی به کانال لاگ."""
+    
+    target_id = LOG_CHANNEL_ID 
+    
+    if not target_id:
+        logger.warning("LOG_CHANNEL_ID تنظیم نشده است. ارسال لاگ امکان‌پذیر نیست.")
         return
 
     # 🟢 چاپ برای اشکال‌زدایی
-    print(f"--- 🟢 Trying to send log to {ADMIN_IDS} ---")
+    print(f"--- 🟢 Trying to send log to Channel {target_id} ---")
 
-    for admin_id in ADMIN_IDS:
-        try:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=message,
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
-        except BadRequest as e:
-            logger.error(f"Error sending log to admin {admin_id}: {e}")
-            print(f"--- 💥 Telegram Error: BadRequest to {admin_id} ({e}) ---")
-        except TelegramError as e:
-            logger.error(f"General Telegram Error sending log to admin {admin_id}: {e}")
-            print(f"--- 💥 General Telegram Error to {admin_id} ({e}) ---")
-        except Exception as e:
-            logger.error(f"Unknown error notifying admin {admin_id}: {e}")
-            print(f"--- 💥 Unknown Error to {admin_id} ({e}) ---")
+    try:
+        await context.bot.send_message(
+            chat_id=target_id, 
+            text=message,
+            parse_mode=None # 👈🏻 فیکس: غیرفعال کردن ParseMode برای جلوگیری از خطای فرمت
+        )
+    except BadRequest as e:
+        logger.error(f"Error sending log to channel {target_id}: {e}")
+        print(f"--- 💥 Telegram Error: BadRequest to Channel {target_id} ({e}) ---")
+    except TelegramError as e:
+        logger.error(f"General Telegram Error sending log to channel {target_id}: {e}")
+        print(f"--- 💥 General Telegram Error to Channel {target_id} ({e}) ---")
+    except Exception as e:
+        logger.error(f"Unknown error notifying channel {target_id}: {e}")
+        print(f"--- 💥 Unknown Error to Channel {target_id} ({e}) ---")
 
 # 💡 توابع هندلر (لطفاً توابع handle_start، get_command_aliases و ... را از فایل قبلی خود به اینجا کپی کنید.)
 
@@ -94,7 +98,8 @@ async def handle_gemini_message(update: Update, context: ContextTypes.DEFAULT_TY
     # ⚠️ این تابع باید اولین کارش، فراخوانی notify_admin_of_message باشد.
     user_info = f"@{update.effective_user.username}" if update.effective_user.username else f"User ID: {update.effective_user.id}"
     message_content = update.message.text
-    notification_message = f"**🔥 پیام جدید از {user_info}:**\n\n**محتوا:** {message_content}"
+    # 🟢 پیام لاگ برای کانال
+    notification_message = f"**[ربات تلگرام]**\n\n**فرستنده:** {user_info}\n**محتوا:** {message_content}"
     await notify_admin_of_message(notification_message, context) # 👈🏻 لاگ‌گیری
     
     # 💡 کدهای اصلی اتصال به Gemini برای پاسخ‌گویی را اینجا قرار دهید.
@@ -111,7 +116,7 @@ def main() -> None:
 
     # 🟢 چاپ برای اشکال‌زدایی
     print(f"--- 🔑 BOT_TOKEN status: {'Set' if BOT_TOKEN else 'Missing'} ---")
-    print(f"--- 🔑 ADMIN_IDS count: {len(ADMIN_IDS)} ---")
+    print(f"--- 🔑 LOG_CHANNEL_ID status: {'Set' if LOG_CHANNEL_ID else 'Missing'} ---")
     
     try:
         # 1. ساخت Application 
