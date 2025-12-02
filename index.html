@@ -6,7 +6,7 @@
     <title>چت‌بات با قابلیت انتخاب شخصیت (چینش نهایی کنترل‌های پایین)</title>
     <style>
         /* ---------------------------------------------------- */
-        /* --- ۱. تعریف متغیرهای CSS (شیشه مات شفاف و Soft UI) --- */
+        /* --- ۱. تعریف متغیرهای CSS (Soft UI و تم‌ها) --- */
         /* ---------------------------------------------------- */
         :root {
             --glass-alpha: 0.95; 
@@ -45,7 +45,7 @@
         }
 
         /* ---------------------------------------------------- */
-        /* --- ۲. استایل‌های پایه و Container (تمام صفحه) --- */
+        /* --- ۲. استایل‌های پایه و فیکس ارتفاع موبایل --- */
         /* ---------------------------------------------------- */
         html, body { 
             height: 100%; width: 100%; margin: 0; padding: 0;
@@ -56,7 +56,7 @@
         body { 
             background: var(--bg-main); color: var(--text-color);
             display: flex; justify-content: center; align-items: center; 
-            height: 100vh; 
+            height: 100vh; /* 👈🏻 برای دسکتاپ و تلاش برای موبایل */
         }
         
         .chat-container { 
@@ -65,44 +65,67 @@
             box-shadow: 0 12px 40px 0 var(--shadow-color); 
             border-radius: 35px; 
             border: 1px solid var(--container-border);
-            display: flex; flex-direction: column; overflow: hidden; 
+            display: flex; flex-direction: column; 
+            overflow: hidden; /* 👈🏻 مهم: جلوگیری از اسکرول کانتینر اصلی */
             transition: all 0.5s ease;
         }
 
+        /* 👈🏻 FIX موبایل: استفاده از ارتفاع کامل و حذف گوشه‌های گرد */
+        @media (max-width: 600px) {
+            body { 
+                height: 100%; 
+                align-items: flex-start; /* شروع از بالا */
+                padding: 0;
+            }
+            .chat-container { 
+                width: 100%; 
+                height: 100vh; /* 👈🏻 استفاده از ارتفاع کامل صفحه */
+                max-width: 100%; 
+                max-height: 100vh; 
+                border-radius: 0; /* حذف گوشه‌های گرد در موبایل */
+            }
+        }
+
+
         /* ---------------------------------------------------- */
-        /* --- ۳. حذف Header و تمرکز بر Input Container (دو ردیف) --- */
+        /* --- ۳. ساختار کنترل‌های دو ردیفه پایین --- */
         /* ---------------------------------------------------- */
         
         /* 🚨 Header قدیمی حذف می‌شود */
         .header-container { display: none; } 
         
-        /* 👈🏻 Input Container: نوار پیام دو بخشی در پایین */
         .input-wrapper { 
             border-top: 1px solid var(--container-border); 
             background: var(--header-input-bg); 
+            flex-shrink: 0; /* 👈🏻 مهم: اجازه نمی‌دهد این بخش کوچک شود */
             z-index: 10;
         }
         
+        /* ردیف ۱: فیلد پیام و ارسال */
         .input-main-row {
             display: flex; 
             padding: 15px; 
             align-items: center;
         }
 
+        /* ردیف ۲: دکمه‌های کنترلی */
         .input-controls-row {
             display: flex;
-            padding: 0 15px 15px 15px; /* پدینگ بالا ندارد چون زیر ردیف اصلی است */
+            padding: 0 15px 15px 15px; 
             gap: 10px;
             align-items: center;
-            justify-content: flex-start; /* شروع از راست (RTL) */
+            justify-content: flex-start; 
         }
         
         .chat-box { 
-            flex-grow: 1; padding: 20px; overflow-y: auto; 
-            display: flex; flex-direction: column-reverse; 
+            flex-grow: 1; /* 👈🏻 این عنصر تمام فضای خالی باقی مانده را می‌گیرد */
+            padding: 20px; 
+            overflow-y: auto; /* 👈🏻 این تنها بخشی است که اسکرول می‌شود */
+            display: flex; 
+            flex-direction: column-reverse; 
         }
 
-        /* --- استایل Soft UI برای دکمه‌ها و فیلدها --- */
+        /* --- استایل Soft UI --- */
         
         /* 👈🏻 فیلدهای ورودی و Select (Soft UI Inset) */
         .input-controls-row input, #personaSelector { 
@@ -112,38 +135,35 @@
                         inset -5px -5px 10px var(--soft-shadow-light); 
             flex-grow: 1; margin-left: 10px; color: var(--text-color);
             box-sizing: border-box; transition: all 0.2s ease;
-            height: 45px; /* ارتفاع یکسان با دکمه‌ها */
+            height: 45px; 
         }
         
-        /* 👈🏻 دکمه‌های کنترل پایین (Soft UI Raised) */
+        /* 👈🏻 دکمه‌ها (Soft UI Raised) */
         .input-controls-row button, .control-button { 
-            padding: 10px 14px; border: none; background-color: var(--soft-base); 
+            padding: 0 15px; border: none; background-color: var(--soft-base); 
             color: var(--text-color); border-radius: 12px; cursor: pointer; 
-            transition: all 0.2s ease; white-space: nowrap;
             box-shadow: 6px 6px 12px var(--soft-shadow-dark), 
                         -6px -6px 12px var(--soft-shadow-light); 
-            width: auto; /* برای دکمه‌های ترکیبی عرض خودکار */
             height: 45px; 
-            padding: 0 15px; /* پدینگ جانبی برای متون */
             display: flex; justify-content: center; align-items: center;
             font-size: 1.1em;
+            flex-shrink: 0;
         }
 
-        /* 👈🏻 فقط دکمه‌های دارک مود و سطل زباله دایره‌ای شوند */
+        /* 👈🏻 دکمه‌های دایره‌ای دارک مود و سطل زباله */
         .input-controls-row .circular-control { 
             width: 45px; height: 45px; border-radius: 50%; padding: 0; 
             font-size: 1.2em;
-            flex-shrink: 0;
         }
         
-        /* 👈🏻 FIX: تنظیم سایز فونت برای آیکون‌های ترکیبی (ثبت نام و شخصیت) */
+        /* 👈🏻 آیکون‌های فیکس شده */
         .icon-button-text { 
-             font-size: 1em; /* اندازه فونت استاندارد برای متن */
+             font-size: 1em; 
              display: flex; align-items: center;
         }
         .icon-button-text span:first-child {
             margin-left: 5px;
-            font-size: 1.2em; /* بزرگتر برای آیکون */
+            font-size: 1.2em; 
         }
         
         /* 👈🏻 افکت فشار دادن (Soft UI Pressed) */
@@ -165,7 +185,7 @@
             transition: all 0.2s ease;
         }
 
-        /* 👈🏻 دکمه ارسال (حالت پلی ▶) */
+        /* 👈🏻 دکمه ارسال (پلی ▶) */
         .send-button { 
             width: 45px; height: 45px; border-radius: 50%; font-size: 20px;
             padding: 0; background-color: #28a745; 
@@ -175,12 +195,9 @@
             transform: none; 
             flex-shrink: 0;
         }
-        .send-button:active { 
-             background-color: #1e7e34;
-        }
 
         /* ---------------------------------------------------- */
-        /* --- ۴. استایل‌های کلاسیک و تمیز برای پیام‌ها --- */
+        /* --- ۴. استایل‌های پیام‌ها --- */
         /* ---------------------------------------------------- */
         
         .message { 
@@ -203,24 +220,24 @@
             border-bottom-left-radius: 5px; 
         }
         
-        .dark-mode .user-message { background-color: var(--user-msg-bg); }
-        .dark-mode .bot-message { background-color: var(--bot-msg-bg); }
-
         /* ---------------------------------------------------- */
         /* --- ۵. Media Query (موبایل) --- */
         /* ---------------------------------------------------- */
         @media (max-width: 600px) {
-            body { height: 100%; align-items: flex-start; padding: 0; }
-            .chat-container { width: 100%; height: 100vh; max-width: 100%; max-height: 100vh; border-radius: 0; }
             
             .input-controls-row {
-                flex-wrap: wrap; /* اجازه می‌دهد دکمه‌ها در موبایل بشکنند */
-                justify-content: space-between;
+                flex-wrap: wrap; 
+                justify-content: flex-start; /* شروع از راست (RTL) */
             }
-            /* دکمه‌های نام و شخصیت نصف صفحه شوند */
+
+            /* 👈🏻 ورودی‌ها و دکمه‌های مربوطه باید فضای کافی داشته باشند */
             .input-controls-row input, #personaSelector {
-                flex-grow: 1; /* فضای باقی‌مانده را بگیرند */
-                width: calc(50% - 30px); /* 50% عرض منهای پدینگ و فاصله */
+                flex-grow: 1; 
+                min-width: 100px; /* حداقل عرض برای خوانایی */
+                margin-bottom: 10px; /* فاصله از آیتم‌های زیر */
+            }
+            .input-controls-row button {
+                margin-bottom: 10px;
             }
         }
         
@@ -235,8 +252,6 @@
 
 <div class="chat-container">
     
-    <div class="header-container"></div>
-
     <div class="chat-box" id="chatBox">
     </div>
     
@@ -422,7 +437,7 @@
     
     // --- اجرای اولیه ---
     loadPersonas().then(() => {
-        appendMessage("🎉 طرح نهایی اعمال شد: کنترل‌های ثبت نام، شخصیت، دارک مود (🌙) و سطل زباله (🗑️) به یک ردیف جداگانه در پایین صفحه منتقل شدند تا ظاهر پاستیلی موبایل حفظ شود. لطفاً Hard Refresh کنید.", 'bot');
+        appendMessage("🎉 طرح نهایی اعمال شد: کنترل‌ها به پایین منتقل و ابعاد برای موبایل بهینه شدند. لطفاً Hard Refresh کنید.", 'bot');
     });
 
 </script>
