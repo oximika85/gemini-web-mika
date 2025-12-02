@@ -346,21 +346,92 @@
     const userNameInput = document.getElementById('userNameInput'); 
     const body = document.getElementById('body');
 
-    // --- مدیریت تم (دارک مود) ---
+    // --- متغیر برای ذخیره‌سازی داده‌های چت ---
+    let chatHistory = []; 
+    
+    // ----------------------------------------------------
+    // --- توابع تولید شناسه و کلید ---
+    // ----------------------------------------------------
+
+    // 🟢 تولید UUID (شناسه منحصر به فرد)
+    function generateUUID() {
+        // یک متد ساده برای تولید UUID
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    // 🟢 دریافت یا تولید شناسه مرورگر/دستگاه
+    function getDeviceId() {
+        let deviceId = localStorage.getItem('deviceId');
+        if (!deviceId) {
+            deviceId = generateUUID();
+            localStorage.setItem('deviceId', deviceId);
+        }
+        return deviceId;
+    }
+
+    // 🟢 تابع اصلی: ساخت کلید منحصر به فرد بر اساس (DeviceID + Name + Persona)
+    function getChatKey() {
+        const deviceId = getDeviceId(); 
+        const userName = userNameInput.value.trim() || 'Guest'; // اگر نام نبود، Guest
+        const personaKey = personaSelector.value || 'default'; 
+        
+        // ساخت کلید برای جداسازی کامل چت‌ها
+        return `chatHistory_${deviceId}_${userName}_${personaKey}`;
+    }
+
+    // ----------------------------------------------------
+    // --- توابع مدیریت ذخیره سازی و تم ---
+    // ----------------------------------------------------
+    
     function toggleTheme() {
         body.classList.toggle('dark-mode');
         const isDarkMode = body.classList.contains('dark-mode');
         document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙'; 
+        localStorage.setItem('theme', isDarkMode ? 'dark' : 'light'); // ذخیره تم
     }
     
-    // --- اجرای اولیه برای تنظیم آیکون تم ---
-    document.addEventListener('DOMContentLoaded', () => {
-        const isDarkMode = body.classList.contains('dark-mode');
-        document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙'; 
-    });
+    function saveChatHistory() {
+        const key = getChatKey(); 
+        localStorage.setItem(key, JSON.stringify(chatHistory));
+    }
+
+    function loadChatHistory() {
+        const key = getChatKey(); 
+        const storedChat = localStorage.getItem(key); 
+        const storedTheme = localStorage.getItem('theme');
+        
+        if (storedTheme === 'dark') {
+             body.classList.add('dark-mode');
+        } else if (storedTheme === 'light') {
+             body.classList.remove('dark-mode');
+        }
+
+        if (storedChat) {
+            chatHistory = JSON.parse(storedChat);
+            chatHistory.forEach(msg => {
+                restoreMessage(msg.text, msg.sender); 
+            });
+            return true; 
+        }
+        return false; 
+    }
+    
+    function restoreMessage(text, sender) { 
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message');
+        messageDiv.classList.add(sender + '-message');
+        messageDiv.innerHTML = escapeHTML(text); 
+        chatBox.insertBefore(messageDiv, chatBox.firstChild);
+    }
 
 
+    // ----------------------------------------------------
     // --- توابع UI اصلی ---
+    // ----------------------------------------------------
+
     userInput.addEventListener('keypress', function(event) {
         if (event.key === 'Enter') {
             sendMessage();
@@ -390,6 +461,9 @@
         if (isLoading) {
             messageDiv.classList.add('loading-dots');
             messageDiv.textContent = ''; 
+        } else {
+            chatHistory.push({ text, sender }); // 👈🏻 ذخیره پیام در آرایه
+            saveChatHistory(); // 👈🏻 ذخیره کل تاریخچه در Local Storage
         }
         
         chatBox.insertBefore(messageDiv, chatBox.firstChild);
@@ -397,11 +471,14 @@
     }
     
     function clearChat() {
+        const key = getChatKey();
         chatBox.innerHTML = '';
+        chatHistory = []; 
+        localStorage.removeItem(key); // 👈🏻 پاک کردن تاریخچه چت فعلی از لوکال استورج
         appendMessage("✅ تاریخچه چت پاک شد و یک سشن جدید آغاز می‌شود.", 'bot');
     }
 
-    // --- توابع API (بدون تغییر) ---
+    // --- توابع API ---
 
     async function loadPersonas() {
         try {
@@ -435,7 +512,14 @@
 
         if (data.status === 'success') {
             clearChat();
-            appendMessage(data.message, 'bot'); 
+            // 👈🏻 بارگذاری چت جدید با کلید جدید
+            const chatLoaded = loadChatHistory(); 
+            
+            if (!chatLoaded) {
+                 appendMessage(data.message, 'bot');
+            } else {
+                 appendMessage("✅ نام کاربر ثبت شد. تاریخچه چت قبلی شما بارگذاری گردید.", 'bot');
+            }
         } else {
             appendMessage(`❌ خطا در ثبت نام: ${data.error}`, 'bot');
         }
@@ -458,7 +542,14 @@
 
             if (data.status === 'success') {
                 clearChat(); 
-                appendMessage(`✅ ${data.message}`, 'bot');
+                // 👈🏻 بارگذاری چت جدید با کلید جدید
+                const chatLoaded = loadChatHistory(); 
+        
+                if (!chatLoaded) {
+                    appendMessage(`✅ ${data.message}`, 'bot');
+                } else {
+                    appendMessage("✅ شخصیت تغییر کرد. تاریخچه چت قبلی شما بارگذاری گردید.", 'bot');
+                }
             } else {
                 appendMessage(`❌ خطا در تغییر شخصیت: ${data.error}`, 'bot');
             }
@@ -501,8 +592,20 @@
     
     // --- اجرای اولیه ---
     loadPersonas().then(() => {
-        /* پیام خوشامدگویی */
-        appendMessage("سلام به ربات هوش مصنوعی خوش آمدید", 'bot');
+        // ۱. گرفتن Device ID
+        getDeviceId(); 
+        
+        // ۲. بارگذاری چت
+        const chatLoaded = loadChatHistory(); 
+        
+        // ۳. پیام خوشامدگویی در صورت نبود چت قبلی
+        if (!chatLoaded) {
+            appendMessage("سلام به ربات هوش مصنوعی خوش آمدید", 'bot');
+        }
+        
+        // ۴. تنظیم آیکون تم
+        const isDarkMode = body.classList.contains('dark-mode');
+        document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙';
     });
 
 </script>
