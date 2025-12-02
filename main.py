@@ -6,7 +6,6 @@ import io
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta, timezone
 
-
 # --- 🚀 وابستگی‌های اضافی ---
 from dotenv import load_dotenv
 from PIL import Image
@@ -17,7 +16,7 @@ from google.genai import types
 
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember, ReplyKeyboardMarkup, KeyboardButton
 # 🟢 فیکس: اضافه کردن import برای مدیریت خطای رایج تلگرام
-from telegram.error import BadRequest, TelegramError # 👈🏻 TelegramError را اضافه کردیم
+from telegram.error import BadRequest, TelegramError 
 from telegram.constants import ChatType, ParseMode
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -49,14 +48,15 @@ ADMIN_IDS: List[int] = [int(i.strip()) for i in admin_id_str.split(',') if i.str
 
 # ⚠️ اگر کلید جیمینای موجود نباشد، ربات اجرا نخواهد شد.
 if not GEMINI_API_KEY:
-    logger.error("❌ GEMINI_API_KEY در متغیرهای محیطی یافت نشد. ربات نمی‌تواند اجرا شود.")
-    # 🟢 چاپ نهایی برای اشکال‌زدایی
+    logger.error("❌ GEMINI_API_KEY در متغیرهای محیطی یافت نشد. ربات نمی‌تواند ادامه دهد.")
     print("--- ❌ CRITICAL ERROR: GEMINI_API_KEY Missing ---") 
-    # raise ValueError("GEMINI_API_KEY Missing") # اگر بخواهید فوراً کرش کنید.
-# ... (بقیه کدهای تابع notify_admin_of_message و توابع دیگر که در کد قبلی داشتید) ...
-# ... (توجه: من کل کد شما را ندارم، مطمئن شوید که تمام توابع قبلی را حفظ کرده‌اید.) ...
 
-# 🟢 تابع notify_admin_of_message (برای اطمینان از صحت)
+
+# ---------------------------------------------------------------------
+# 🛎️ توابع کمکی و اصلی
+# ---------------------------------------------------------------------
+
+# 🟢 تابع notify_admin_of_message (اصلاح شده برای اشکال‌زدایی)
 async def notify_admin_of_message(message: str, context: ContextTypes.DEFAULT_TYPE, chat_id: Optional[int] = None) -> None:
     """ارسال پیام نظارتی به تمام ادمین‌های لیست شده."""
     if not ADMIN_IDS:
@@ -74,22 +74,36 @@ async def notify_admin_of_message(message: str, context: ContextTypes.DEFAULT_TY
                 parse_mode=ParseMode.MARKDOWN_V2
             )
         except BadRequest as e:
-            # این خطا معمولاً به دلیل مسدود کردن ربات توسط کاربر است
             logger.error(f"Error sending log to admin {admin_id}: {e}")
-            # 🟢 چاپ خطا
             print(f"--- 💥 Telegram Error: BadRequest to {admin_id} ({e}) ---")
         except TelegramError as e:
-            # سایر خطاهای تلگرام
             logger.error(f"General Telegram Error sending log to admin {admin_id}: {e}")
-            # 🟢 چاپ خطا
             print(f"--- 💥 General Telegram Error to {admin_id} ({e}) ---")
         except Exception as e:
             logger.error(f"Unknown error notifying admin {admin_id}: {e}")
-            # 🟢 چاپ خطا
             print(f"--- 💥 Unknown Error to {admin_id} ({e}) ---")
 
+# 💡 توابع هندلر (لطفاً توابع handle_start، get_command_aliases و ... را از فایل قبلی خود به اینجا کپی کنید.)
 
-# ... (تمام توابع هندلر مثل handle_start، handle_gemini_message، و غیره باید اینجا باشند) ...
+async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # 💡 کدهای هندلر استارت خود را اینجا قرار دهید.
+    await update.message.reply_text("ربات فعال است.")
+
+async def handle_gemini_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """هندلر اصلی پیام متنی: لاگ می‌گیرد و با Gemini پاسخ می‌دهد."""
+    # ⚠️ این تابع باید اولین کارش، فراخوانی notify_admin_of_message باشد.
+    user_info = f"@{update.effective_user.username}" if update.effective_user.username else f"User ID: {update.effective_user.id}"
+    message_content = update.message.text
+    notification_message = f"**🔥 پیام جدید از {user_info}:**\n\n**محتوا:** {message_content}"
+    await notify_admin_of_message(notification_message, context) # 👈🏻 لاگ‌گیری
+    
+    # 💡 کدهای اصلی اتصال به Gemini برای پاسخ‌گویی را اینجا قرار دهید.
+    await update.message.reply_text("پیام نظارتی ارسال شد و اکنون منتظر پاسخ Gemini است...") 
+    pass # ادامه کدهای شما
+
+async def update_user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """این تابع آمارگیری است که موقتاً در main() غیرفعال شده است."""
+    pass
 
 
 def main() -> None:
@@ -100,7 +114,7 @@ def main() -> None:
     print(f"--- 🔑 ADMIN_IDS count: {len(ADMIN_IDS)} ---")
     
     try:
-        # 1. ساخت Application (اینجا ممکن است به دلیل توکن اشتباه کرش کند)
+        # 1. ساخت Application 
         application = Application.builder().token(BOT_TOKEN).build()
     except Exception as e:
         # اگر مشکلی در توکن یا ساخت Application بود، اینجا چاپ می‌شود.
@@ -109,8 +123,26 @@ def main() -> None:
         return # پایان برنامه
 
     # 2. ثبت هندلرها
-    # ... (تمام خطوط application.add_handler(...) شما باید اینجا باشند) ...
-
+    
+    # الف) هندلرهای دستورات (Commands)
+    
+    # 💡 تمام CommandHandlerهای خود را اینجا قرار دهید.
+    application.add_handler(CommandHandler("start", handle_start)) 
+    # ... (CommandHandlerهای قبلی خود را در اینجا قرار دهید.) ...
+    
+    
+    # ج) هندلر پیام‌های متنی (Text Messages)
+    
+    # 🥇 هندلر Gemini: فقط روی متن‌هایی که دستور نیستند اجرا می‌شود.
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_gemini_message))
+    
+    
+    # د) هندلر آمارگیری (General Updates)
+    
+    # ❌ هندلر آمارگیری که از filters.ALL استفاده می‌کرد، موقتاً کامنت شده است.
+    # application.add_handler(MessageHandler(filters.ALL, update_user_stats))
+    
+    
     # 4. شروع Polling
     logger.info("Telebot has started polling...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
