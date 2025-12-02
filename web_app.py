@@ -1,10 +1,9 @@
-# web_app.py (نسخه نهایی با لاگ‌گیری متمرکز)
+# web_app.py (نسخه نهایی و تضمین شده)
 
 import os
 import logging
 import json
 from typing import Dict, List, Optional, Any 
-import requests # 👈🏻 اضافه شد برای ارسال لاگ به تلگرام
 
 # --- 🚀 وابستگی‌های اضافی ---
 from dotenv import load_dotenv
@@ -30,10 +29,6 @@ logger = logging.getLogger(__name__)
 
 # --- 🔒 تنظیمات و توکن‌ها ---
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINIAPIKEY")
-
-# 🟢 متغیرهای جدید برای لاگ‌گیری تلگرام (باید در Render تنظیم شوند)
-TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
-LOG_CHANNEL_ID: Optional[str] = os.getenv("LOG_CHANNEL_ID") 
 
 
 # --- ⚙️ تنظیمات کلی ربات (شخصیت‌های شما) ---
@@ -115,7 +110,7 @@ user_personas: Dict[int, str] = {}
 chat_sessions: Dict[int, Any] = {}
 
 # --- 🧠 کلاس و توابع جیمینای ---
-# ... (کلاس GeminiClient و get_gemini_client در اینجا قرار دارد) ...
+
 GEMINI_MODEL = 'gemini-2.5-flash'
 
 class GeminiClient:
@@ -157,7 +152,8 @@ def get_gemini_client() -> Optional['GeminiClient']:
     except Exception as e:
         logger.error(f"❌ Failed to initialize Gemini Client: {e}")
         return None
-# ... (توابع Persistence در اینجا قرار دارد) ...
+
+# --- 💾 توابع Persistence (ذخیره‌سازی و بارگذاری) ---
 def load_personas_from_file():
     global persona_configs, user_personas
     
@@ -200,39 +196,6 @@ def get_chat_session(user_id: int) -> Any:
             system_instruction=system_instruction
         )
     return chat_sessions[user_id]
-
-
-# 🟢 تابع کمکی برای ارسال لاگ به تلگرام (اضافه شد)
-def send_web_log_to_telegram(nickname: str, prompt: str, response: str):
-    """ارسال لاگ فعالیت وب‌سایت به کانال تلگرام."""
-    global TELEGRAM_BOT_TOKEN, LOG_CHANNEL_ID
-    if not TELEGRAM_BOT_TOKEN or not LOG_CHANNEL_ID:
-        logger.warning("TELEGRAM_BOT_TOKEN or LOG_CHANNEL_ID not set in web app. Skipping log.")
-        return
-
-    # پیدا کردن نام شخصیت فعال
-    current_persona_name = DEFAULT_PERSONA_CONFIGS.get(user_personas.get(USER_ID_FOR_WEB, 'default'), {}).get('name', 'N/A')
-    
-    # پیام لاگ با اطلاعات نام انتخابی
-    log_message = (
-        f"[وب‌سایت Render]\n"
-        f"شخصیت: {current_persona_name}\n"
-        f"کاربر: {nickname}\n"
-        f"پرسش: {prompt}\n"
-        f"پاسخ: {response[:150]}..." # برش پاسخ برای جلوگیری از پیام طولانی
-    )
-    
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        'chat_id': LOG_CHANNEL_ID,
-        'text': log_message,
-        'parse_mode': None # 👈🏻 برای جلوگیری از خطای فرمت
-    }
-    
-    try:
-        requests.post(url, data=payload)
-    except Exception as e:
-        logger.error(f"Failed to send web log to Telegram: {e}")
 
 
 # -----------------------------------------------
@@ -281,7 +244,7 @@ def set_persona_endpoint():
         'new_persona_name': persona_configs[persona_key].get('name', persona_key)
     })
 
-# --- 💬 درگاه چت (اصلاح شده) ---
+# --- 💬 درگاه چت ---
 
 @app.route('/api/chat', methods=['POST'])
 def chat_endpoint():
@@ -292,33 +255,22 @@ def chat_endpoint():
 
     data = request.get_json()
     user_message = data.get('message')
-    # 🟢 دریافت نام انتخابی کاربر
-    nickname = data.get('nickname', 'کاربر وب ناشناس') 
     
     if not user_message:
-        # 🟢 ارسال لاگ اگر پیام خالی بود
-        send_web_log_to_telegram(nickname, "پیام خالی", "پاسخ داده نشد.")
         return jsonify({'response': 'لطفاً پیامی ارسال کنید.'}), 400
 
     chat = get_chat_session(USER_ID_FOR_WEB) 
     if not chat:
-        # 🟢 ارسال لاگ خطا قبل از برگرداندن پاسخ
-        send_web_log_to_telegram(nickname, user_message, "خطای اتصال به Gemini.")
         return jsonify({'response': '❌ خطای اتصال به Gemini.'}), 500
         
     try:
         response = chat.send_message(user_message)
         bot_response = response.text
         
-        # 🟢 ارسال لاگ موفقیت‌آمیز
-        send_web_log_to_telegram(nickname, user_message, bot_response)
-        
         return jsonify({'response': bot_response})
         
     except Exception as e:
         logger.error(f"Error in Gemini interaction: {e}")
-        # 🟢 ارسال لاگ خطا
-        send_web_log_to_telegram(nickname, user_message, f"خطا در تعامل با Gemini: {e}")
         return jsonify({'response': '❌ ببخشید، مشکلی در ارتباط با هوش مصنوعی پیش آمده.'}), 500
 
 

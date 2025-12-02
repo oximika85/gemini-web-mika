@@ -13,11 +13,6 @@
         #personaSelector { padding: 8px; border-radius: 5px; border: 1px solid #ccc; flex-grow: 1; margin-left: 10px; }
         .header-container button { padding: 8px 12px; border: none; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
         
-        /* 🟢 استایل جدید برای نام مستعار */
-        .nickname-container { padding: 10px; border-bottom: 1px solid #ddd; background-color: #fafafa; text-align: right; }
-        .nickname-container input { padding: 8px; border-radius: 5px; border: 1px solid #ccc; width: 90%; margin-top: 5px; text-align: right;}
-        .nickname-container label { font-size: 0.9em; color: #555; display: block; margin-bottom: 5px;}
-
         .chat-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column-reverse; }
         .message { margin-bottom: 10px; padding: 10px 15px; border-radius: 20px; max-width: 80%; }
         .user-message { background-color: #007bff; color: white; align-self: flex-start; margin-right: auto; }
@@ -34,11 +29,6 @@
         <select id="personaSelector" title="انتخاب شخصیت"></select>
         <button onclick="setPersona()">تغییر شخصیت</button>
     </div>
-    
-    <div class="nickname-container">
-        <label for="nicknameInput">نام انتخابی برای استفاده از ربات:</label>
-        <input type="text" id="nicknameInput" value="کاربر وب ناشناس" placeholder="یک اسم انتخاب کنید">
-    </div>
 
     <div class="chat-box" id="chatBox">
         </div>
@@ -53,7 +43,6 @@
     const chatBox = document.getElementById('chatBox');
     const userInput = document.getElementById('userInput');
     const personaSelector = document.getElementById('personaSelector');
-    const nicknameInput = document.getElementById('nicknameInput'); // 👈🏻 دریافت فیلد جدید
 
     // --- توابع UI اصلی ---
     userInput.addEventListener('keypress', function(event) {
@@ -84,7 +73,7 @@
             const data = await response.json();
             
             if (data.personas) {
-                personaSelector.innerHTML = ''; 
+                personaSelector.innerHTML = ''; // پاک کردن گزینه‌های قبلی
                 data.personas.forEach(p => {
                     const option = document.createElement('option');
                     option.value = p.key;
@@ -94,6 +83,7 @@
             }
         } catch (error) {
             console.error('Error loading personas:', error);
+            // پیام خطا در کنسول
         }
     }
 
@@ -111,6 +101,7 @@
             const data = await response.json();
 
             if (data.status === 'success') {
+                // اگر تغییر موفق بود، چت را ریست می‌کنیم.
                 clearChat(); 
                 appendMessage(`✅ ${data.message}`, 'bot');
             } else {
@@ -123,7 +114,6 @@
 
     async function sendMessage() {
         const message = userInput.value.trim();
-        const nickname = nicknameInput.value.trim() || 'کاربر وب ناشناس'; // 👈🏻 خواندن نام مستعار
         if (message === "") return;
 
         appendMessage(message, 'user');
@@ -135,15 +125,12 @@
             const response = await fetch('/api/chat', { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    message: message,
-                    nickname: nickname // 👈🏻 ارسال نام مستعار در Payload
-                })
+                body: JSON.stringify({ message: message })
             });
 
             const data = await response.json();
             
-            chatBox.removeChild(chatBox.firstChild); 
+            chatBox.removeChild(chatBox.firstChild); // حذف Loading
             
             if (data.response) {
                 appendMessage(data.response, 'bot');
@@ -159,6 +146,7 @@
     
     // --- اجرای اولیه ---
     loadPersonas().then(() => {
+        // بعد از لود شدن شخصیت‌ها، پیام خوش‌آمدگویی را نمایش می‌دهیم.
         appendMessage("سلام! شخصیت مورد نظر خود را از منوی بالا انتخاب کنید.", 'bot');
     });
 
