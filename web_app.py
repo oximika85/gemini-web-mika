@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی و تصحیح شده با MongoDB Persistence)
+# web_app.py (نسخه نهایی با MongoDB Persistence و رفع خطای 'to_dict')
 
 import os
 import logging
@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 # --- 🚀 وابستگی‌های اضافی ---
 from dotenv import load_dotenv
 import uuid 
-import pymongo # 👈🏻 اضافه شد
+import pymongo # 👈🏻 برای اتصال به MongoDB
 from pymongo.errors import ConnectionFailure, OperationFailure
 
 # --- 🧠 وابستگی‌های جیمینای ---
@@ -121,12 +121,10 @@ class GeminiClient:
         self.client = genai.Client(api_key=api_key) 
         self._model_name = GEMINI_MODEL 
 
-    # 👈🏻 تزریق تاریخچه به سشن چت در زمان ساخت
     def create_chat(self, system_instruction: str, history: List[types.Content] = None): 
         config = types.GenerateContentConfig(
             system_instruction=system_instruction
         )
-        # سشن چت جدید با تزریق تاریخچه قبلی ساخته می‌شود
         return self.client.chats.create(
             model=self._model_name, 
             config=config,
@@ -216,12 +214,11 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
         return
         
     try:
-        # 🚨 رفع خطای: 'UserContent' object has no attribute 'to_dict'
-        # تبدیل Content objects به دیکشنری‌های قابل ذخیره
+        # 🚨 این بخش، رفع قطعی خطای 'UserContent' object has no attribute 'to_dict' است:
         history_dicts = []
         for item in history:
-            # مطمئن می‌شویم که item.to_dict() برای ذخیره کردن استفاده می‌شود
-            history_dicts.append(item.to_dict())
+            # از متد to_dict() برای تبدیل Content object به دیکشنری استفاده می‌کند
+            history_dicts.append(item.to_dict()) 
         
         # ذخیره یا به روز رسانی سند در دیتابیس
         CONVERSATIONS_COLLECTION.update_one(
@@ -229,9 +226,9 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
             {"$set": {"history": history_dicts}},
             upsert=True # اگر وجود نداشت، بساز
         )
-        logger.info(f"History saved for session {session_id[:8]}...")
+        logger.info(f"✅ History saved for session {session_id[:8]}...")
     except Exception as e:
-        logger.error(f"Error saving history for {session_id[:8]}... to DB: {e}")
+        logger.error(f"❌ Error saving history for {session_id[:8]}... to DB: {e}")
 
 
 # --- 💾 توابع Session Management ---
@@ -297,10 +294,11 @@ def get_chat_session(session_id: str) -> Any:
 app = Flask(__name__, static_folder='.', static_url_path='') 
 CORS(app) 
 
+# 🚨🚨🚨 اطمینان حاصل کنید که این متغیر در Render ست شده است!
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or 'a_very_secret_key_for_session_management_999'
 
 # --- 🟢 درگاه‌های انتخاب شخصیت و نام ---
-# (بدون تغییر)
+
 @app.route('/api/personas', methods=['GET'])
 def get_personas_endpoint():
     """برگرداندن لیست کلید و نام شخصیت‌ها برای نمایش در Dropdown."""
@@ -321,18 +319,14 @@ def set_user_name_endpoint():
     
     session_id = get_session_id() 
 
-    # 1. ذخیره نام جدید در session Flask
     session['user_name'] = user_name
     
-    # 2. ریست کردن سشن چت (نیاز به ساخت مجدد برای اعمال System Prompt جدید)
     if session_id in chat_sessions:
         del chat_sessions[session_id]
     
-    # 3. ساخت سشن جدید با نام جدید
     current_persona_key = session.get("persona_key", "default") 
     create_new_chat_session(session_id, current_persona_key, user_name)
     
-    # 4. 👈🏻 تاریخچه در دیتابیس حفظ می‌شود (نیازی به پاک کردن نیست)
 
     if user_name:
         message = f"✅ نام شما با موفقیت به **{user_name}** ثبت شد. چت ریست و سوابق قبلی بارگذاری شدند."
@@ -357,20 +351,15 @@ def set_persona_endpoint():
         
     session_id = get_session_id() 
     
-    # 1. به‌روزرسانی شخصیت در session Flask
     session['persona_key'] = persona_key
         
-    # 2. ریست کردن سشن چت 
     if session_id in chat_sessions:
         del chat_sessions[session_id]
     
-    # 3. ساخت سشن جدید با شخصیت جدید (نام موجود از سشن حفظ می‌شود)
     active_user_name = session.get("user_name")
     create_new_chat_session(session_id, persona_key, active_user_name)
         
     logger.info(f"Persona for web session ({session_id[:8]}...) set to: {persona_key}. Name: {active_user_name}")
-    
-    # 4. 👈🏻 تاریخچه در دیتابیس حفظ می‌شود (نیازی به پاک کردن نیست)
 
     return jsonify({
         'status': 'success',
@@ -407,7 +396,7 @@ def chat_endpoint():
         response = chat.send_message(user_message)
         bot_response = response.text
         
-        # 🚨 ذخیره تاریخچه به‌روز شده در MongoDB
+        # 🚨 فراخوانی تابع ذخیره‌سازی تصحیح شده
         save_history_to_db(session_id, chat.get_history()) 
         
         return jsonify({'response': bot_response})
@@ -429,7 +418,8 @@ def serve_index():
 # --- 🚀 تابع اصلی برای اجرا ---
 # -----------------------------------------------
 
-initialize_mongodb() # 👈🏻 اتصال به دیتابیس در ابتدای برنامه
+# 👈🏻 اتصال به دیتابیس در ابتدای برنامه
+initialize_mongodb() 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
