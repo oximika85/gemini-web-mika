@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
     <title>چت‌بات با قابلیت انتخاب شخصیت (نهایی)</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/lib/marked.umd.min.js"></script>
+    
     <style>
         /* ---------------------------------------------------- */
         /* --- ۱. تعریف متغیرهای CSS (Soft UI و تم‌ها) --- */
@@ -297,6 +300,20 @@
         .loading-dots::after { content: '.'; animation: loading 1.5s infinite; display: inline-block; overflow: hidden; width: 30px; text-align: left; color: var(--text-color); }
         @keyframes loading { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } 100% { content: '.'; } }
         
+        /* 🚨 استایل‌های مورد نیاز برای محتوای Markdown */
+        .message p { margin: 0; }
+        .message ul, .message ol { padding-right: 20px; margin-top: 5px; margin-bottom: 5px;}
+        .message h1, .message h2, .message h3 { margin: 10px 0 5px 0; font-weight: bold; font-size: 1.1em;}
+        .message code {
+            background-color: rgba(0, 0, 0, 0.1);
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .dark-mode .message code {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
     </style>
 </head>
 <body id="body">
@@ -346,50 +363,126 @@
     const userNameInput = document.getElementById('userNameInput'); 
     const body = document.getElementById('body');
 
-    // --- مدیریت تم (دارک مود) ---
+    let chatHistory = []; 
+    
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    function getDeviceId() {
+        let deviceId = localStorage.getItem('deviceId');
+        if (!deviceId) {
+            deviceId = generateUUID();
+            localStorage.setItem('deviceId', deviceId);
+        }
+        return deviceId;
+    }
+
+    function getChatKey() {
+        const deviceId = getDeviceId(); 
+        const userName = userNameInput.value.trim() || 'Guest'; 
+        const personaKey = personaSelector.value || 'default'; 
+        return `chatHistory_${deviceId}_${userName}_${personaKey}`;
+    }
+
+    // ----------------------------------------------------
+    // --- توابع مدیریت ذخیره سازی و تم ---
+    // ----------------------------------------------------
+    
     function toggleTheme() {
         body.classList.toggle('dark-mode');
         const isDarkMode = body.classList.contains('dark-mode');
         document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙'; 
+        localStorage.setItem('theme', isDarkMode ? 'dark' : 'light'); 
     }
     
-    // --- اجرای اولیه برای تنظیم آیکون تم ---
-    document.addEventListener('DOMContentLoaded', () => {
-        const isDarkMode = body.classList.contains('dark-mode');
-        document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙'; 
-    });
+    function saveChatHistory() {
+        const key = getChatKey(); 
+        localStorage.setItem(key, JSON.stringify(chatHistory));
+    }
+
+    function loadChatHistory() {
+        const key = getChatKey(); 
+        const storedChat = localStorage.getItem(key); 
+        const storedTheme = localStorage.getItem('theme');
+        
+        if (storedTheme === 'dark') {
+             body.classList.add('dark-mode');
+             document.getElementById('themeToggle').textContent = '☀️';
+        } else if (storedTheme === 'light') {
+             body.classList.remove('dark-mode');
+             document.getElementById('themeToggle').textContent = '🌙';
+        }
+
+        if (storedChat) {
+            chatHistory = JSON.parse(storedChat);
+            chatHistory.forEach(msg => {
+                restoreMessage(msg.text, msg.sender); 
+            });
+            return true; 
+        }
+        return false; 
+    }
+    
+    // 🚨 FIX: این تابع باید برای پیام‌های ربات از marked.parse استفاده کند
+    function restoreMessage(text, sender) { 
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message');
+        messageDiv.classList.add(sender + '-message');
+        
+        // 👈🏻 برای پیام کاربر، escape (چون کاربر نباید HTML تزریق کند)
+        if (sender === 'user') {
+            messageDiv.innerHTML = text.replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+            })[m]); 
+        } 
+        // 👈🏻 برای پیام ربات، از marked.parse استفاده می‌کنیم
+        else {
+             messageDiv.innerHTML = marked.parse(text); 
+        }
+
+        chatBox.insertBefore(messageDiv, chatBox.firstChild);
+    }
 
 
+    // ----------------------------------------------------
     // --- توابع UI اصلی ---
+    // ----------------------------------------------------
+
     userInput.addEventListener('keypress', function(event) {
         if (event.key === 'Enter') {
             sendMessage();
         }
     });
 
-    function escapeHTML(str) {
-        if (!str) return '';
-        return str.replace(/[&<>"']/g, function(m) {
-            return {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            }[m];
-        });
-    }
+    // 🚨 حذف تابع escapeHTML و استفاده از آن فقط برای پیام کاربر در appendMessage/restoreMessage
     
+    // 🚨 FIX: این تابع نیز باید برای پیام‌های ربات از marked.parse استفاده کند
     function appendMessage(text, sender, isLoading = false) { 
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message');
         messageDiv.classList.add(sender + '-message');
         
-        messageDiv.innerHTML = escapeHTML(text); 
-        
         if (isLoading) {
             messageDiv.classList.add('loading-dots');
             messageDiv.textContent = ''; 
+        } 
+        // 👈🏻 پیام کاربر: فقط Escape
+        else if (sender === 'user') {
+             messageDiv.innerHTML = text.replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+            })[m]); 
+            chatHistory.push({ text, sender }); 
+            saveChatHistory();
+        } 
+        // 👈🏻 پیام ربات: استفاده از marked.parse
+        else {
+             messageDiv.innerHTML = marked.parse(text); 
+             chatHistory.push({ text, sender }); 
+             saveChatHistory();
         }
         
         chatBox.insertBefore(messageDiv, chatBox.firstChild);
@@ -397,7 +490,10 @@
     }
     
     function clearChat() {
+        const key = getChatKey();
         chatBox.innerHTML = '';
+        chatHistory = []; 
+        localStorage.removeItem(key); 
         appendMessage("✅ تاریخچه چت پاک شد و یک سشن جدید آغاز می‌شود.", 'bot');
     }
 
@@ -435,7 +531,13 @@
 
         if (data.status === 'success') {
             clearChat();
-            appendMessage(data.message, 'bot'); 
+            const chatLoaded = loadChatHistory(); 
+            
+            if (!chatLoaded) {
+                 appendMessage(data.message, 'bot');
+            } else {
+                 appendMessage("✅ نام کاربر ثبت شد. تاریخچه چت قبلی شما بارگذاری گردید.", 'bot');
+            }
         } else {
             appendMessage(`❌ خطا در ثبت نام: ${data.error}`, 'bot');
         }
@@ -458,7 +560,13 @@
 
             if (data.status === 'success') {
                 clearChat(); 
-                appendMessage(`✅ ${data.message}`, 'bot');
+                const chatLoaded = loadChatHistory(); 
+        
+                if (!chatLoaded) {
+                    appendMessage(`✅ ${data.message}`, 'bot');
+                } else {
+                    appendMessage("✅ شخصیت تغییر کرد. تاریخچه چت قبلی شما بارگذاری گردید.", 'bot');
+                }
             } else {
                 appendMessage(`❌ خطا در تغییر شخصیت: ${data.error}`, 'bot');
             }
@@ -501,8 +609,15 @@
     
     // --- اجرای اولیه ---
     loadPersonas().then(() => {
-        /* پیام خوشامدگویی */
-        appendMessage("سلام به ربات هوش مصنوعی خوش آمدید", 'bot');
+        getDeviceId(); 
+        const chatLoaded = loadChatHistory(); 
+        
+        if (!chatLoaded) {
+            appendMessage("سلام به ربات هوش مصنوعی خوش آمدید", 'bot');
+        }
+        
+        const isDarkMode = body.classList.contains('dark-mode');
+        document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙';
     });
 
 </script>
