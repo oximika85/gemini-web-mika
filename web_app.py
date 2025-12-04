@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با MongoDB Persistence و تضمین ذخیره‌سازی متن)
+# web_app.py (نسخه نهایی و پایدار)
 
 import os
 import logging
@@ -188,7 +188,10 @@ def initialize_mongodb():
         MONGO_CLIENT = None
 
 def load_history_from_db(session_id: str) -> List[types.Content]:
-    """بازیابی تاریخچه مکالمات از MongoDB و تبدیل به فرمت Gemini."""
+    """
+    بازیابی تاریخچه مکالمات از MongoDB و تبدیل به فرمت Gemini با بازسازی دستی.
+    🚨 FIX: رفع خطای from_dict با بازسازی دستی Content.
+    """
     if CONVERSATIONS_COLLECTION is None:
         return []
     
@@ -197,21 +200,32 @@ def load_history_from_db(session_id: str) -> List[types.Content]:
         if doc and 'history' in doc:
             history_list = []
             for item in doc['history']:
-                # تبدیل دیکشنری ذخیره شده به شی Content جیمینای
-                history_list.append(types.Content.from_dict(item))
+                # بازسازی دستی شیء Content برای دور زدن خطای from_dict
+                parts = []
+                for part_dict in item.get('parts', []):
+                    text = part_dict.get('text', '')
+                    if text:
+                        # استفاده از from_text برای ساخت Part به صورت سازگار
+                        parts.append(types.Part.from_text(text))
+                
+                if parts: # فقط در صورتی که محتوایی وجود داشته باشد، به تاریخچه اضافه شود
+                     history_list.append(types.Content(
+                        role=item.get('role', 'user'),
+                        parts=parts
+                    ))
             
-            logger.info(f"Loaded {len(history_list)} items for session {session_id[:8]}...")
+            logger.info(f"Loaded {len(history_list)} items for session {session_id[:8]}... successfully.")
             return history_list
         
     except Exception as e:
-        logger.error(f"Error loading history for {session_id[:8]}... from DB: {e}")
+        logger.error(f"❌ Error loading history for {session_id[:8]}... from DB: {e}. Data structure mismatch suspected.")
         
     return []
 
 def save_history_to_db(session_id: str, history: List[types.Content]):
     """
     ذخیره تاریخچه مکالمات در MongoDB.
-    شامل منطق شرطی برای دور زدن خطای 'UserContent' object has no attribute 'to_dict' و تضمین ذخیره متن.
+    🚨 FIX: دور زدن خطای 'UserContent' object has no attribute 'to_dict' و تضمین ذخیره متن.
     """
     if CONVERSATIONS_COLLECTION is None:
         return
@@ -225,7 +239,7 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
             if hasattr(item, 'to_dict'):
                 history_dicts.append(item.to_dict())
                 
-            # 2. روش دستی برای UserContent و ModelContent (که to_dict ندارند یا متنش خالی ذخیره می‌شود)
+            # 2. روش دستی برای UserContent و ModelContent
             elif hasattr(item, 'parts') and hasattr(item, 'role'):
                 
                 parts_dicts = []
@@ -234,7 +248,7 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
                     if hasattr(part, 'to_dict'):
                          parts_dicts.append(part.to_dict())
                     elif hasattr(part, 'text'):
-                         # 🚨 این خط تضمین می‌کند که متن را مستقیماً از Part object بخواند.
+                         # این خط تضمین می‌کند که متن را مستقیماً از Part object بخواند.
                          parts_dicts.append({"text": part.text})
                     else:
                          parts_dicts.append({"text": "Error: Could not serialize part content."})
@@ -369,6 +383,7 @@ def set_persona_endpoint():
     persona_key = data.get('persona_key')
     
     if not persona_key or persona_key not in persona_configs:
+        # 🚨 پاسخ 400 استاندارد برای فرانت‌اند
         return jsonify({'error': 'کلید شخصیت نامعتبر است.'}), 400
         
     session_id = get_session_id() 
@@ -382,11 +397,14 @@ def set_persona_endpoint():
     create_new_chat_session(session_id, persona_key, active_user_name)
         
     logger.info(f"Persona for web session ({session_id[:8]}...) set to: {persona_key}. Name: {active_user_name}")
+    
+    # 🚨 ارسال نام شخصیت جدید در پاسخ برای بروزرسانی رابط کاربری (Frontend)
+    new_persona_name = persona_configs[persona_key].get('name', persona_key)
 
     return jsonify({
         'status': 'success',
-        'message': f"شخصیت با موفقیت به **{persona_configs[persona_key].get('name', persona_key)}** تغییر کرد. چت ریست و سوابق قبلی بارگذاری شدند.",
-        'new_persona_name': persona_configs[persona_key].get('name', persona_key)
+        'message': f"شخصیت با موفقیت به **{new_persona_name}** تغییر کرد. چت ریست و سوابق قبلی بارگذاری شدند.",
+        'new_persona_name': new_persona_name
     })
 
 # --- 💬 درگاه چت ---
@@ -401,7 +419,8 @@ def chat_endpoint():
     data = request.get_json()
     user_message = data.get('message')
     
-    if not user_message:
+    if not user_message or not user_message.strip():
+        # 🚨 پاسخ 400 استاندارد برای پیام خالی
         return jsonify({'response': 'لطفاً پیامی ارسال کنید.'}), 400
 
     session_id = get_session_id() 

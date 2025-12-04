@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
     <title>چت‌بات با قابلیت انتخاب شخصیت (نهایی)</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/lib/marked.umd.min.js"></script>
     <style>
         /* ---------------------------------------------------- */
         /* --- ۱. تعریف متغیرهای CSS (Soft UI و تم‌ها) --- */
@@ -19,595 +20,652 @@
             --container-border: rgba(255, 255, 255, 1); 
             --shadow-color: rgba(31, 38, 135, 0.4);
             
-            --soft-base: #f0f0f0; 
-            --soft-shadow-light: rgba(255, 255, 255, 0.8);
-            --soft-shadow-dark: rgba(174, 174, 192, 0.3);
-
-            --user-msg-bg: #007bff; 
-            --bot-msg-bg: #f0f0f0; 
-            --msg-border: rgba(0, 0, 0, 0.1); 
+            --user-bubble-bg: #80cbc4; /* سبز آبی روشن */
+            --bot-bubble-bg: #f48fb1; /* صورتی روشن */
+            --button-color: #6a1b9a; /* بنفش عمیق */
+            --button-text: white;
+            --modal-bg: rgba(0, 0, 0, 0.5);
         }
 
-        /* Dark Mode Overrides */
-        .dark-mode {
-            --bg-main: linear-gradient(135deg, #202030 0%, #302020 100%);
+        /* حالت تاریک (Dark Mode) */
+        body.dark-mode {
+            --bg-main: linear-gradient(135deg, #1c1c1c 0%, #333333 100%);
             
-            --container-bg: linear-gradient(135deg, rgba(32, 32, 48, 0.8), rgba(48, 32, 32, 0.8));
-            --header-input-bg: linear-gradient(135deg, rgba(32, 32, 48, 0.9), rgba(48, 32, 32, 0.9));
+            --container-bg: rgba(40, 40, 40, 0.85);
+            --header-input-bg: rgba(50, 50, 50, 0.95);
             
             --text-color: #f0f0f0;
-            --container-border: rgba(0, 0, 0, 0.3);
-            --shadow-color: rgba(0, 0, 0, 0.9);
+            --container-border: rgba(100, 100, 100, 0.5);
+            --shadow-color: rgba(0, 0, 0, 0.7);
             
-            --soft-base: #505050; 
-            --soft-shadow-light: rgba(80, 80, 80, 0.8);
-            --soft-shadow-dark: rgba(20, 20, 20, 0.8);
-            
-            --user-msg-bg: #007bff; 
-            --bot-msg-bg: #505050;
-            --msg-border: rgba(255, 255, 255, 0.1);
+            --user-bubble-bg: #4db6ac; /* سبز آبی تیره */
+            --bot-bubble-bg: #e91e63; /* صورتی تیره */
+            --button-color: #ba68c8; /* بنفش روشن */
+        }
+        
+        /* ---------------------------------------------------- */
+        /* --- ۲. سبک‌های اصلی (Soft UI/Glassmorphism) --- */
+        /* ---------------------------------------------------- */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Tahoma', sans-serif;
         }
 
-        /* ---------------------------------------------------- */
-        /* --- ۲. استایل‌های اصلی --- */
-        /* ---------------------------------------------------- */
-        
-        html, body { 
-            height: 100%; width: 100%; margin: 0; padding: 0;
-            font-family: 'Tahoma', 'Vazirmatn', 'B Titr', 'B Zar', sans-serif; 
-            transition: all 0.5s ease;
-        }
-        
-        body { 
-            background: var(--bg-main); 
+        body {
+            height: 100vh;
+            background: var(--bg-main);
             color: var(--text-color);
-            display: flex; justify-content: center; align-items: center; 
-            height: 100vh; 
-            position: relative; 
-            overflow: hidden; 
+            transition: background 0.5s, color 0.5s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
-        
-        .chat-container { 
-            width: 90vw; max-width: 1000px; height: 90vh; max-height: 90vh; 
-            background: var(--container-bg); 
-            box-shadow: 0 12px 40px 0 var(--shadow-color); 
-            border-radius: 35px; 
+
+        .chat-container {
+            width: 90%;
+            max-width: 600px;
+            height: 90%;
+            display: flex;
+            flex-direction: column;
+            background: var(--container-bg);
+            border-radius: 20px;
+            overflow: hidden;
+            
+            /* Glassmorphism Effect */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             border: 1px solid var(--container-border);
-            display: flex; flex-direction: column; 
-            overflow: hidden; 
-            transition: all 0.5s ease;
-            position: relative; 
-            z-index: 10;
+            box-shadow: 0 8px 32px 0 var(--shadow-color);
         }
-
-        .chat-container::before, .chat-container::after {
-            content: none; 
-            display: none;
-        }
-
-        @media (max-width: 600px) {
-            body { 
-                height: 100%; 
-                align-items: flex-start; 
-                padding: 0;
-            }
-            .chat-container { 
-                width: 100%; 
-                height: 100vh; 
-                max-width: 100%; 
-                max-height: 100vh; 
-                border-radius: 0; 
-            }
-        }
-
 
         /* ---------------------------------------------------- */
-        /* --- ۳. ساختار کنترل‌ها (با دکمه ارسال جدا) --- */
+        /* --- ۳. سبک‌های هدر --- */
         /* ---------------------------------------------------- */
-        
-        .header-container { display: none; } 
-        
-        .input-wrapper { 
-            border-top: 1px solid var(--container-border); 
-            background: var(--header-input-bg); 
-            flex-shrink: 0; 
-            z-index: 10;
-        }
-        
-        /* 👈🏻 ردیف ۱: فیلد پیام و دکمه ارسال (کنار هم) */
-        .input-main-row {
-            display: flex; 
-            padding: 15px; 
-            align-items: center;
-            gap: 15px; /* فاصله بین فیلد و دکمه */
-            position: relative; 
-        }
-
-        .input-main-row input { 
-            font-family: inherit; 
-            /* 👈🏻 پدینگ عادی چون دکمه کنارش است، نه روی آن */
-            flex-grow: 1; padding: 12px 20px 12px 20px; 
-            border: none; border-radius: 25px; 
-            margin: 0; 
-            text-align: right; color: var(--text-color);
-            background: var(--soft-base);
-            box-shadow: inset 2px 2px 5px var(--soft-shadow-dark), 
-                        inset -5px -5px 10px var(--soft-shadow-light); 
-            box-sizing: border-box; 
-        }
-
-        /* 👈🏻 ردیف ۲: کنترل‌ها */
-        .input-controls-row {
+        .header {
+            padding: 15px;
+            background: var(--header-input-bg);
+            border-bottom: 1px solid var(--container-border);
             display: flex;
-            padding: 0 15px 15px 15px; 
-            gap: 10px;
+            justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap; 
-            justify-content: flex-start;
-        }
-        
-        .control-group {
-            display: flex;
-            align-items: center;
-            flex-grow: 1; 
-            min-width: 180px; 
-            gap: 5px; 
-            margin-bottom: 0px; 
-            flex-basis: calc(50% - 30px); 
-        }
-        
-        .circular-controls-wrapper {
-            display: flex;
-            gap: 10px;
-            flex-shrink: 0;
-            flex-grow: 0; 
-            justify-content: flex-start; 
-            margin-bottom: 0px; 
-            min-width: 100px;
-            margin-left: auto; 
-        }
-
-        @media (max-width: 600px) {
-            .control-group, .circular-controls-wrapper {
-                flex-basis: 100%; 
-                margin-bottom: 15px; 
-            }
-            .control-group input, .control-group select {
-                flex-grow: 1;
-                margin-left: 0 !important; 
-            }
-            .circular-controls-wrapper {
-                justify-content: flex-end; 
-                margin-left: 0; 
-            }
-        }
-
-        .chat-box { 
-            flex-grow: 1; 
-            padding: 20px; 
-            overflow-y: auto; 
-            display: flex; 
-            flex-direction: column-reverse; 
-        }
-
-        /* ---------------------------------------------------- */
-        /* --- ۴. استایل Soft UI و دکمه‌ها --- */
-        /* ---------------------------------------------------- */
-        
-        .input-controls-row input, #personaSelector { 
-            font-family: inherit; 
-            padding: 10px; 
-            border-radius: 25px; 
-            border: none; 
-            background: var(--soft-base);
-            box-shadow: inset 2px 2px 5px var(--soft-shadow-dark), 
-                        inset -5px -5px 10px var(--soft-shadow-light); 
-            flex-grow: 1; 
-            color: var(--text-color);
-            box-sizing: border-box; transition: all 0.2s ease;
-            height: 45px; 
-        }
-        
-        .input-controls-row button:not(.circular-control) { 
-            font-family: inherit;
-            padding: 0 15px; border: none; background-color: var(--soft-base); 
-            color: var(--text-color); 
-            border-radius: 35px; 
-            cursor: pointer; 
-            box-shadow: 6px 6px 12px var(--soft-shadow-dark), 
-                        -6px -6px 12px var(--soft-shadow-light); 
-            height: 45px; 
-            display: flex; justify-content: center; align-items: center;
-            font-size: 1.1em;
             flex-shrink: 0;
         }
 
-        .circular-control { 
-            width: 45px; height: 45px; 
-            border-radius: 50%; 
-            padding: 0; 
+        .header-info {
+            display: flex;
+            flex-direction: column;
+            text-align: right;
+        }
+
+        .header-info h2 {
             font-size: 1.2em;
-            background-color: var(--soft-base); 
-            box-shadow: 6px 6px 12px var(--soft-shadow-dark), 
-                        -6px -6px 12px var(--soft-shadow-light); 
+            margin-bottom: 5px;
+        }
+
+        .header-info p {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+        
+        .header-buttons button {
+            background: var(--button-color);
+            color: var(--button-text);
             border: none;
+            padding: 8px 15px;
+            margin-right: 10px;
+            border-radius: 10px;
             cursor: pointer;
-            color: var(--text-color);
-            flex-shrink: 0;
-        }
-
-        /* جلوه فشردگی (Pressed) برای دکمه‌های غیر سبز */
-        .input-controls-row button:active, 
-        .circular-control:active {
-            box-shadow: inset 2px 2px 5px var(--soft-shadow-dark), 
-                        inset -5px -5px 10px var(--soft-shadow-light);
-            transform: scale(0.98); 
-        }
-
-        /* 👈🏻 دکمه ارسال (عنصر کنار فیلد پیام) */
-        .send-button { 
-            width: 45px; height: 45px; border-radius: 50%; 
-            font-size: 20px;
-            padding: 0; background-color: #28a745; 
-            color: white; border: none;
-            box-shadow: 3px 3px 8px rgba(40, 167, 69, 0.4), 
-                        -3px -3px 8px var(--soft-shadow-light); 
-            flex-shrink: 0;
-            cursor: pointer;
-            /* 👈🏻 حذف تمام استایل‌های موقعیت مطلق (Absolute Positioning) */
-            position: unset; 
-            top: unset;
-            transform: unset; 
-            z-index: 20;
+            font-weight: bold;
+            transition: background 0.3s;
         }
         
-        /* 🟢 جلوه فشردگی (Pressed) اختصاصی برای دکمه ارسال (سبز) 🟢 */
-        .send-button:active {
-            box-shadow: inset 2px 2px 5px rgba(0, 100, 0, 0.6), 
-                        inset -3px -3px 8px rgba(100, 255, 100, 0.8); 
-            transform: scale(0.98); 
-        }
-
-
-        /* --- ۵. استایل‌های پیام‌ها --- */
-        
-        .message { 
-            margin-bottom: 12px; padding: 12px 18px; border-radius: 20px; 
-            max-width: 85%; word-wrap: break-word; 
-            border: 1px solid var(--msg-border); 
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1); 
-            text-align: right; 
+        .header-buttons button:hover {
+            opacity: 0.9;
         }
         
-        .user-message { 
-            background-color: var(--user-msg-bg); color: white; 
-            align-self: flex-end; margin-left: auto; margin-right: unset; 
-            border-top-left-radius: 5px; 
-            border-bottom-right-radius: 5px; 
+        /* ---------------------------------------------------- */
+        /* --- ۴. سبک‌های باکس چت و پیام‌ها --- */
+        /* ---------------------------------------------------- */
+        .chat-box {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
-        .bot-message { 
-            background-color: var(--bot-msg-bg); color: var(--text-color); 
-            align-self: flex-start; margin-right: auto; margin-left: unset; 
-            border-top-right-radius: 5px; 
+
+        .message-container {
+            display: flex;
+            max-width: 80%;
+        }
+
+        .user {
+            justify-content: flex-start; /* تغییر برای راست به چپ: پیام کاربر سمت چپ */
+            margin-right: auto;
+        }
+
+        .bot {
+            justify-content: flex-end; /* تغییر برای راست به چپ: پیام ربات سمت راست */
+            margin-left: auto;
+        }
+
+        .message {
+            padding: 10px 15px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            line-height: 1.5;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            font-size: 0.95em;
+        }
+
+        .user .message {
+            background-color: var(--user-bubble-bg);
+            color: #111;
             border-bottom-left-radius: 5px; 
         }
+
+        .bot .message {
+            background-color: var(--bot-bubble-bg);
+            color: var(--button-text);
+            border-bottom-right-radius: 5px;
+        }
+
+        /* ---------------------------------------------------- */
+        /* --- ۵. سبک‌های بخش ورودی --- */
+        /* ---------------------------------------------------- */
+        .input-area {
+            display: flex;
+            padding: 10px;
+            background: var(--header-input-bg);
+            border-top: 1px solid var(--container-border);
+            flex-shrink: 0;
+        }
+
+        .input-area input {
+            flex-grow: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 20px;
+            margin-left: 10px;
+            background-color: rgba(255, 255, 255, 0.9);
+            color: var(--text-color);
+            font-size: 1em;
+            outline: none;
+        }
         
-        /* ... لودینگ ... */
-        .loading-dots { color: transparent !important; }
-        .loading-dots::after { content: '.'; animation: loading 1.5s infinite; display: inline-block; overflow: hidden; width: 30px; text-align: left; color: var(--text-color); }
-        @keyframes loading { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } 100% { content: '.'; } }
+        .input-area input.dark-mode-input {
+             background-color: rgba(0, 0, 0, 0.3);
+             color: #fff;
+        }
+
+        .input-area button {
+            background: var(--button-color);
+            color: var(--button-text);
+            border: none;
+            padding: 10px 18px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-size: 1.2em;
+        }
+
+        .input-area button:hover {
+            opacity: 0.8;
+        }
         
+        /* ---------------------------------------------------- */
+        /* --- ۶. سبک‌های مودال (پنجره پاپ‌آپ) --- */
+        /* ---------------------------------------------------- */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 10;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: var(--modal-bg);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background: var(--container-bg);
+            margin: 15% auto;
+            padding: 20px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 400px;
+            text-align: center;
+            border: 1px solid var(--container-border);
+            box-shadow: 0 4px 10px var(--shadow-color);
+            color: var(--text-color);
+        }
+        
+        .modal-content h3 {
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .modal-content select, 
+        .modal-content input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            background-color: rgba(255, 255, 255, 0.9);
+            color: var(--text-color);
+            font-size: 1em;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .modal-content button {
+            width: 100%;
+            padding: 10px;
+            background: var(--button-color);
+            color: var(--button-text);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: opacity 0.3s;
+        }
+        
+        .modal-content button:hover {
+            opacity: 0.9;
+        }
+        
+        .close-button {
+            float: left;
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+        }
+        
+        .close-button:hover,
+        .close-button:focus {
+            color: var(--text-color);
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        /* ---------------------------------------------------- */
+        /* --- ۷. سبک‌های تایپینگ و Markdown --- */
+        /* ---------------------------------------------------- */
+        .typing-indicator {
+            display: inline-block;
+        }
+        .typing-indicator span {
+            animation: bounce 1s infinite;
+            opacity: 0;
+            display: inline-block;
+        }
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes bounce {
+            0%, 60%, 100% {
+                transform: translateY(0);
+                opacity: 0;
+            }
+            30% {
+                transform: translateY(-5px);
+                opacity: 1;
+            }
+        }
+        
+        /* استایل‌های Markdown */
+        .message-content h1, .message-content h2, .message-content h3 {
+            margin-top: 10px;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .message-content ul, .message-content ol {
+            padding-right: 20px;
+            margin-bottom: 5px;
+        }
+        .message-content p {
+            margin-bottom: 5px;
+        }
+        .message-content code {
+            background-color: rgba(0, 0, 0, 0.1);
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .bot .message-content code {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
     </style>
 </head>
-<body id="body">
+<body class="light-mode">
 
-<div class="chat-container">
-    
-    <div class="chat-box" id="chatBox">
-    </div>
-    
-    <div class="input-wrapper">
-        
-        <div class="input-main-row">
-            <input type="text" id="userInput" placeholder="پیام خود را بنویسید..." autofocus>
-            <button onclick="sendMessage()" class="send-button" title="ارسال">
-                <span>▶</span>
-            </button>
+    <div class="chat-container">
+        <div class="header">
+            <div class="header-buttons">
+                <button id="personaButton">تغییر شخصیت</button>
+                <button id="themeToggle"><span id="themeIcon">☀️</span></button>
+            </div>
+            <div class="header-info">
+                <h2 id="currentPersonaName">دستیار حرفه‌ای (اطلس) 🤖</h2>
+                <p>چت با: <span id="userNameDisplay">کاربر مهمان</span></p>
+            </div>
         </div>
-        
-        <div class="input-controls-row">
+
+        <div class="chat-box" id="chatBox">
+            </div>
+
+        <div class="input-area">
+            <button id="sendButton">ارسال</button>
+            <input type="text" id="userInput" placeholder="پیام خود را بنویسید..." class="light-mode-input">
+        </div>
+    </div>
+
+    <div id="personaModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" onclick="document.getElementById('personaModal').style.display='none'">&times;</span>
+            <h3>تنظیم شخصیت و نام کاربر</h3>
             
-            <div class="control-group">
-                <input type="text" id="userNameInput" placeholder="نام شما">
-                <button onclick="setUserName()" title="ثبت نام کاربر">
-                    <span class="icon-button-text">✅👤</span>
-                </button> 
-            </div>
+            <p>نام شما (اختیاری):</p>
+            <input type="text" id="userNameInput" placeholder="نامی که می‌خواهید ربات صدایتان کند...">
+            <button id="setUserNameButton" onclick="setUserName()">ثبت نام</button>
+            
+            <hr style="margin: 15px 0; border-color: rgba(0, 0, 0, 0.1);">
 
-            <div class="control-group">
-                <select id="personaSelector" title="انتخاب شخصیت"></select>
-                <button onclick="setPersona()" title="تغییر شخصیت">
-                    <span class="icon-button-text">🎭</span>
-                </button>
-            </div>
-
-            <div class="circular-controls-wrapper">
-                 <button id="themeToggle" onclick="toggleTheme()" class="circular-control" title="تغییر تم">🌙</button>
-                 <button onclick="clearChat()" class="circular-control clear-chat" title="حذف چت">🗑️</button>
-            </div>
+            <p>شخصیت ربات:</p>
+            <select id="personaSelect">
+                </select>
+            <button id="selectPersonaButton">تغییر شخصیت</button>
         </div>
     </div>
-</div>
 
-<script>
-    const chatBox = document.getElementById('chatBox');
-    const userInput = document.getElementById('userInput');
-    const personaSelector = document.getElementById('personaSelector');
-    const userNameInput = document.getElementById('userNameInput'); 
-    const body = document.getElementById('body');
+    <script>
+        // --- متغیرهای سراسری ---
+        const chatBox = document.getElementById('chatBox');
+        const userInput = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
+        const personaSelect = document.getElementById('personaSelect');
+        const personaButton = document.getElementById('personaButton');
+        const selectPersonaButton = document.getElementById('selectPersonaButton');
+        const currentPersonaNameElement = document.getElementById('currentPersonaName');
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const body = document.body; 
+        const personaModal = document.getElementById('personaModal');
+        const userNameInput = document.getElementById('userNameInput');
+        const setUserNameButton = document.getElementById('setUserNameButton');
+        const userNameDisplay = document.getElementById('userNameDisplay');
 
-    // --- متغیر برای ذخیره‌سازی داده‌های چت ---
-    let chatHistory = []; 
-    
-    // ----------------------------------------------------
-    // --- توابع تولید شناسه و کلید ---
-    // ----------------------------------------------------
+        // --- توابع کمکی (برای ذخیره/بارگذاری تاریخچه محلی) ---
 
-    // 🟢 تولید UUID (شناسه منحصر به فرد)
-    function generateUUID() {
-        // یک متد ساده برای تولید UUID
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-        });
-    }
-
-    // 🟢 دریافت یا تولید شناسه مرورگر/دستگاه
-    function getDeviceId() {
-        let deviceId = localStorage.getItem('deviceId');
-        if (!deviceId) {
-            deviceId = generateUUID();
-            localStorage.setItem('deviceId', deviceId);
+        function getDeviceId() {
+            let deviceId = localStorage.getItem('deviceId');
+            if (!deviceId) {
+                deviceId = 'device-' + Date.now() + Math.random().toString(16).slice(2);
+                localStorage.setItem('deviceId', deviceId);
+            }
+            return deviceId; // در این پروژه استفاده نمی‌شود، اما برای سشن ID در مرورگر لازم است.
         }
-        return deviceId;
-    }
-
-    // 🟢 تابع اصلی: ساخت کلید منحصر به فرد بر اساس (DeviceID + Name + Persona)
-    function getChatKey() {
-        const deviceId = getDeviceId(); 
-        const userName = userNameInput.value.trim() || 'Guest'; // اگر نام نبود، Guest
-        const personaKey = personaSelector.value || 'default'; 
         
-        // ساخت کلید برای جداسازی کامل چت‌ها
-        return `chatHistory_${deviceId}_${userName}_${personaKey}`;
-    }
-
-    // ----------------------------------------------------
-    // --- توابع مدیریت ذخیره سازی و تم ---
-    // ----------------------------------------------------
-    
-    function toggleTheme() {
-        body.classList.toggle('dark-mode');
-        const isDarkMode = body.classList.contains('dark-mode');
-        document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙'; 
-        localStorage.setItem('theme', isDarkMode ? 'dark' : 'light'); // ذخیره تم
-    }
-    
-    function saveChatHistory() {
-        const key = getChatKey(); 
-        localStorage.setItem(key, JSON.stringify(chatHistory));
-    }
-
-    function loadChatHistory() {
-        const key = getChatKey(); 
-        const storedChat = localStorage.getItem(key); 
-        const storedTheme = localStorage.getItem('theme');
-        
-        if (storedTheme === 'dark') {
-             body.classList.add('dark-mode');
-        } else if (storedTheme === 'light') {
-             body.classList.remove('dark-mode');
+        function saveMessageToHistory(text, sender) {
+            let history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+            history.push({ text, sender });
+            localStorage.setItem('chatHistory', JSON.stringify(history));
         }
 
-        if (storedChat) {
-            chatHistory = JSON.parse(storedChat);
-            chatHistory.forEach(msg => {
-                restoreMessage(msg.text, msg.sender); 
+        function loadChatHistory() {
+            const history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+            history.forEach(msg => {
+                appendMessage(msg.text, msg.sender);
             });
-            return true; 
+            return history.length > 0;
         }
-        return false; 
-    }
-    
-    function restoreMessage(text, sender) { 
-        const messageDiv = document.createElement('div');
-        messageDiv.classList.add('message');
-        messageDiv.classList.add(sender + '-message');
-        messageDiv.innerHTML = escapeHTML(text); 
-        chatBox.insertBefore(messageDiv, chatBox.firstChild);
-    }
 
-
-    // ----------------------------------------------------
-    // --- توابع UI اصلی ---
-    // ----------------------------------------------------
-
-    userInput.addEventListener('keypress', function(event) {
-        if (event.key === 'Enter') {
-            sendMessage();
-        }
-    });
-
-    function escapeHTML(str) {
-        if (!str) return '';
-        return str.replace(/[&<>"']/g, function(m) {
-            return {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            }[m];
-        });
-    }
-    
-    function appendMessage(text, sender, isLoading = false) { 
-        const messageDiv = document.createElement('div');
-        messageDiv.classList.add('message');
-        messageDiv.classList.add(sender + '-message');
-        
-        messageDiv.innerHTML = escapeHTML(text); 
-        
-        if (isLoading) {
-            messageDiv.classList.add('loading-dots');
-            messageDiv.textContent = ''; 
-        } else {
-            chatHistory.push({ text, sender }); // 👈🏻 ذخیره پیام در آرایه
-            saveChatHistory(); // 👈🏻 ذخیره کل تاریخچه در Local Storage
-        }
-        
-        chatBox.insertBefore(messageDiv, chatBox.firstChild);
-        return messageDiv; 
-    }
-    
-    function clearChat() {
-        const key = getChatKey();
-        chatBox.innerHTML = '';
-        chatHistory = []; 
-        localStorage.removeItem(key); // 👈🏻 پاک کردن تاریخچه چت فعلی از لوکال استورج
-        appendMessage("✅ تاریخچه چت پاک شد و یک سشن جدید آغاز می‌شود.", 'bot');
-    }
-
-    // --- توابع API ---
-
-    async function loadPersonas() {
-        try {
-            const response = await fetch('/api/personas');
-            const data = await response.json();
+        function appendMessage(text, sender, isLoading = false) {
+            const messageContainer = document.createElement('div');
+            messageContainer.classList.add('message-container', sender);
             
-            if (data.personas) {
-                personaSelector.innerHTML = ''; 
-                data.personas.forEach(p => {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            
+            const content = document.createElement('div');
+            content.classList.add('message-content');
+
+            if (isLoading) {
+                 content.innerHTML = '<div class="typing-indicator"><span>.</span><span>.</span><span>.</span></div>';
+            } else {
+                // نمایش متن با Markdown
+                const renderedText = marked.parse(text);
+                content.innerHTML = renderedText;
+                
+                // ذخیره پیام در تاریخچه مرورگر
+                if(text) saveMessageToHistory(text, sender);
+            }
+
+            messageDiv.appendChild(content);
+            messageContainer.appendChild(messageDiv);
+            chatBox.appendChild(messageContainer);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            if (isLoading) return messageContainer; 
+        }
+
+        // --- توابع اصلی ---
+
+        async function loadPersonas() {
+            try {
+                const response = await fetch('/api/personas');
+                const data = await response.json();
+                
+                personaSelect.innerHTML = '';
+                data.personas.forEach(persona => {
                     const option = document.createElement('option');
-                    option.value = p.key;
-                    option.textContent = p.name;
-                    personaSelector.appendChild(option);
+                    option.value = persona.key;
+                    option.textContent = persona.name;
+                    personaSelect.appendChild(option);
                 });
+                
+                // پس از لود شدن، نام شخصیت پیش‌فرض را نمایش می‌دهد
+                if(data.personas.length > 0) {
+                    const defaultPersona = data.personas.find(p => p.key === 'default') || data.personas[0];
+                    currentPersonaNameElement.textContent = defaultPersona.name;
+                }
+                
+            } catch (error) {
+                console.error('Error loading personas:', error);
+                appendMessage('❌ خطایی در بارگذاری لیست شخصیت‌ها رخ داد.', 'bot');
             }
-        } catch (error) {
-            console.error('Error loading personas:', error);
         }
-    }
-
-    async function setUserName() {
-        const userName = userNameInput.value.trim();
         
-        const response = await fetch('/api/set_user_name', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_name: userName })
+        // 🚨 FIX 1: مدیریت خطای 400 و رفع خطای 'اتصال به سرور' برای پیام خالی
+        async function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message) {
+                appendMessage("لطفاً یک پیام معتبر تایپ کنید.", 'bot');
+                return;
+            }
+
+            appendMessage(message, 'user');
+            userInput.value = '';
+            
+            const loadingMessage = appendMessage('', 'bot', true); 
+            
+            try {
+                const response = await fetch('/api/chat', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message }) 
+                });
+
+                const data = await response.json();
+                
+                chatBox.removeChild(loadingMessage); 
+                
+                // 🚨 بررسی وضعیت پاسخ (وضعیت 400/500)
+                if (!response.ok) {
+                    // اگر سرور پاسخ خطا داد (400 برای پیام خالی یا 500)
+                    appendMessage(data.response || 'خطای ناشناخته از سرور.', 'bot');
+                    return; 
+                }
+                
+                if (data.response) {
+                    appendMessage(data.response, 'bot');
+                } else {
+                     appendMessage('پاسخی دریافت نشد.', 'bot');
+                }
+
+            } catch (error) {
+                // این بلاک فقط برای خطاهای شبکه واقعی (مثل قطع شدن اینترنت) استفاده می‌شود.
+                chatBox.removeChild(loadingMessage); 
+                appendMessage('خطا در اتصال به سرور.', 'bot');
+            }
+        }
+        
+        // 🚨 FIX 2 & 3: نمایش نام جدید شخصیت در UI و مدیریت خطای API
+        async function setPersona() {
+            const personaKey = personaSelect.value;
+            if (!personaKey) {
+                appendMessage('لطفاً یک شخصیت را انتخاب کنید.', 'bot');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/set_persona', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ persona_key: personaKey })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'success') {
+                    // 🚨 بروزرسانی نام شخصیت در هدر
+                    currentPersonaNameElement.textContent = data.new_persona_name;
+                    appendMessage(data.message, 'bot'); 
+                    
+                    // پاک کردن تاریخچه محلی چت برای هماهنگی با ریست شدن چت در سرور
+                    localStorage.removeItem('chatHistory');
+                    
+                } else if (data.error) {
+                    // نمایش خطای سرور
+                    appendMessage(`❌ خطای تغییر شخصیت: ${data.error}`, 'bot');
+                } else {
+                     // نمایش خطای عمومی
+                    appendMessage('❌ خطای ناشناخته هنگام تغییر شخصیت.', 'bot');
+                }
+                
+            } catch (error) {
+                console.error('Network or other error during persona change:', error);
+                // 🚨 نمایش پیام خطای شفاف در فرانت‌اند
+                appendMessage('❌ خطای اتصال به سرور برای تغییر شخصیت. لطفاً اتصال اینترنت خود را بررسی کنید.', 'bot');
+            } finally {
+                personaModal.style.display = 'none'; // بستن مودال در هر صورت
+            }
+        }
+        
+
+        async function setUserName() {
+            const userName = userNameInput.value.trim();
+            
+            try {
+                const response = await fetch('/api/set_user_name', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name: userName })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'success') {
+                    // 🚨 بروزرسانی نام کاربر در رابط کاربری و ذخیره محلی
+                    localStorage.setItem('userName', userName);
+                    userNameDisplay.textContent = userName || 'کاربر مهمان';
+                    appendMessage(data.message, 'bot');
+                     // پاک کردن تاریخچه محلی چت برای هماهنگی با ریست شدن چت در سرور
+                    localStorage.removeItem('chatHistory');
+                    
+                } else {
+                    appendMessage('❌ خطایی در ثبت نام کاربری رخ داد.', 'bot');
+                }
+                
+            } catch (error) {
+                appendMessage('❌ خطای شبکه هنگام ثبت نام کاربری.', 'bot');
+            }
+        }
+
+
+        function toggleTheme() {
+            body.classList.toggle('dark-mode');
+            const isDarkMode = body.classList.contains('dark-mode');
+            themeIcon.textContent = isDarkMode ? '🌙' : '☀️';
+            
+            // ذخیره تم در Local Storage
+            localStorage.setItem('theme', isDarkMode ? 'dark-mode' : 'light-mode');
+        }
+
+        // --- مدیریت رویدادها ---
+
+        sendButton.addEventListener('click', sendMessage);
+
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        themeToggle.addEventListener('click', toggleTheme);
+        personaButton.addEventListener('click', () => {
+            personaModal.style.display = 'block';
+            userNameInput.value = localStorage.getItem('userName') || '';
         });
         
-        const data = await response.json();
+        selectPersonaButton.addEventListener('click', setPersona);
 
-        if (data.status === 'success') {
-            clearChat();
-            // 👈🏻 بارگذاری چت جدید با کلید جدید
-            const chatLoaded = loadChatHistory(); 
-            
-            if (!chatLoaded) {
-                 appendMessage(data.message, 'bot');
-            } else {
-                 appendMessage("✅ نام کاربر ثبت شد. تاریخچه چت قبلی شما بارگذاری گردید.", 'bot');
+        // بستن مودال با کلید Escape
+        window.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                personaModal.style.display = 'none';
             }
-        } else {
-            appendMessage(`❌ خطا در ثبت نام: ${data.error}`, 'bot');
-        }
-    }
+        });
 
-    async function setPersona() {
-        const selectedKey = personaSelector.value;
-        if (!selectedKey) return;
+        // --- اجرای اولیه ---
+        function init() {
+            // ۱. تنظیم تم بر اساس Local Storage
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'dark-mode') {
+                body.classList.add('dark-mode');
+                themeIcon.textContent = '🌙';
+            } else {
+                body.classList.remove('dark-mode');
+                themeIcon.textContent = '☀️';
+            }
 
-        try {
-            const response = await fetch('/api/set_persona', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    persona_key: selectedKey
-                })
-            });
+            // ۲. تنظیم نام کاربر از Local Storage
+            userNameDisplay.textContent = localStorage.getItem('userName') || 'کاربر مهمان';
 
-            const data = await response.json();
-
-            if (data.status === 'success') {
-                clearChat(); 
-                // 👈🏻 بارگذاری چت جدید با کلید جدید
+            // ۳. لود کردن لیست شخصیت‌ها و تاریخچه
+            loadPersonas().then(() => {
+                getDeviceId(); 
                 const chatLoaded = loadChatHistory(); 
-        
+                
+                // ۴. پیام خوشامدگویی در صورت نبود چت قبلی
                 if (!chatLoaded) {
-                    appendMessage(`✅ ${data.message}`, 'bot');
-                } else {
-                    appendMessage("✅ شخصیت تغییر کرد. تاریخچه چت قبلی شما بارگذاری گردید.", 'bot');
+                    appendMessage("سلام! من دستیار هوش مصنوعی شما هستم. لطفاً پیامی برای شروع مکالمه ارسال کنید. شما می‌توانید نام خود و شخصیت مرا از بخش 'تغییر شخصیت' تنظیم کنید.", 'bot');
                 }
-            } else {
-                appendMessage(`❌ خطا در تغییر شخصیت: ${data.error}`, 'bot');
-            }
-        } catch (error) {
-            appendMessage('خطا در اتصال به سرور برای تغییر شخصیت.', 'bot');
-        }
-    }
-
-    async function sendMessage() {
-        const message = userInput.value.trim();
-        if (message === "") return;
-
-        appendMessage(message, 'user');
-        userInput.value = '';
-        
-        const loadingMessage = appendMessage('', 'bot', true); 
-        
-        try {
-            const response = await fetch('/api/chat', { 
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: message }) 
             });
-
-            const data = await response.json();
-            
-            chatBox.removeChild(loadingMessage); 
-            
-            if (data.response) {
-                appendMessage(data.response, 'bot');
-            } else {
-                 appendMessage('پاسخی دریافت نشد.', 'bot');
-            }
-
-        } catch (error) {
-            chatBox.removeChild(loadingMessage); 
-            appendMessage('خطا در اتصال به سرور.', 'bot');
-        }
-    }
-    
-    // --- اجرای اولیه ---
-    loadPersonas().then(() => {
-        // ۱. گرفتن Device ID
-        getDeviceId(); 
-        
-        // ۲. بارگذاری چت
-        const chatLoaded = loadChatHistory(); 
-        
-        // ۳. پیام خوشامدگویی در صورت نبود چت قبلی
-        if (!chatLoaded) {
-            appendMessage("سلام به ربات هوش مصنوعی خوش آمدید", 'bot');
         }
         
-        // ۴. تنظیم آیکون تم
-        const isDarkMode = body.classList.contains('dark-mode');
-        document.getElementById('themeToggle').textContent = isDarkMode ? '☀️' : '🌙';
-    });
+        init();
 
-</script>
+    </script>
 </body>
 </html>
