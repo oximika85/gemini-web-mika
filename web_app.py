@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با MongoDB Persistence و رفع خطای 'to_dict')
+# web_app.py (نسخه نهایی با MongoDB Persistence و رفع خطای 'to_dict' + کدهای دیباگ)
 
 import os
 import logging
@@ -23,9 +23,10 @@ from flask_cors import CORS
 load_dotenv()
 
 # --- 📝 تنظیمات لاگ‌گیری ---
+# 🚨 سطح لاگ‌گیری را روی INFO می‌گذاریم تا پیام‌های دیباگ جدید (با تگ ⚡️ DEBUG) در Render دیده شوند.
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO 
 )
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,8 @@ def initialize_mongodb():
     """راه‌اندازی اتصال به MongoDB و تعریف کالکشن."""
     global MONGO_CLIENT, CONVERSATIONS_COLLECTION
     
+    logger.info("⚡️ DEBUG: Starting MongoDB initialization...") # DEBUG
+    
     if MONGO_CLIENT is not None:
         return
         
@@ -213,13 +216,20 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
     if CONVERSATIONS_COLLECTION is None:
         return
         
-    try:
-        # 🚨 این بخش، رفع قطعی خطای 'UserContent' object has no attribute 'to_dict' است:
-        history_dicts = []
-        for item in history:
-            # از متد to_dict() برای تبدیل Content object به دیکشنری استفاده می‌کند
-            history_dicts.append(item.to_dict()) 
+    logger.info(f"⚡️ DEBUG: Starting save for session {session_id[:8]}... History length: {len(history)}") # DEBUG
         
+    try:
+        history_dicts = []
+        
+        # 🚨 این حلقه محل اصلی خطا است، بنابراین با دقت دیباگ می‌شود.
+        for i, item in enumerate(history):
+            logger.info(f"⚡️ DEBUG: Converting item {i} of type {type(item)}...") # DEBUG
+            
+            # تبدیل به دیکشنری. اگر خطا اینجا رخ دهد، می‌دانیم که item.to_dict مشکل دارد.
+            history_dicts.append(item.to_dict()) 
+            
+        logger.info(f"⚡️ DEBUG: Conversion complete. Final dicts size: {len(history_dicts)}") # DEBUG
+            
         # ذخیره یا به روز رسانی سند در دیتابیس
         CONVERSATIONS_COLLECTION.update_one(
             {"session_id": session_id},
@@ -228,20 +238,20 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
         )
         logger.info(f"✅ History saved for session {session_id[:8]}...")
     except Exception as e:
-        logger.error(f"❌ Error saving history for {session_id[:8]}... to DB: {e}")
-
+        # اگر خطا اینجا رخ دهد، دقیقا می‌فهمیم کجای حلقه بوده است و نوع آخرین آبجکت تلاش‌شده را می‌بینیم.
+        logger.error(f"❌ Error saving history for {session_id[:8]}... to DB: {e}. Last item type tried: {type(item)}") # DEBUG with error context
 
 # --- 💾 توابع Session Management ---
 
 def get_session_id() -> str:
-    """Gets the unique session ID from the Flask session, creating it if necessary."""
+# ... (بدون تغییر) ...
     if 'session_id' not in session:
         session['session_id'] = str(uuid.uuid4())
     return session['session_id']
 
 
 def create_new_chat_session(session_id: str, current_persona_key: str, active_user_name: Optional[str]) -> Any:
-    """ساخت سشن چت جدید با دستورالعمل سیستم به‌روز شده و تزریق تاریخچه از DB."""
+# ... (بدون تغییر) ...
     global GEMINI_CLIENT
 
     base_system_instruction = persona_configs.get(current_persona_key, persona_configs["default"])["prompt"]
@@ -269,7 +279,7 @@ def create_new_chat_session(session_id: str, current_persona_key: str, active_us
     
     
 def get_chat_session(session_id: str) -> Any: 
-    """برگرداندن سشن چت موجود یا ساختن سشن جدید در صورت عدم وجود."""
+# ... (بدون تغییر) ...
     global GEMINI_CLIENT
     if GEMINI_CLIENT is None:
         GEMINI_CLIENT = get_gemini_client()
@@ -298,10 +308,9 @@ CORS(app)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or 'a_very_secret_key_for_session_management_999'
 
 # --- 🟢 درگاه‌های انتخاب شخصیت و نام ---
-
+# ... (بدون تغییر) ...
 @app.route('/api/personas', methods=['GET'])
 def get_personas_endpoint():
-    """برگرداندن لیست کلید و نام شخصیت‌ها برای نمایش در Dropdown."""
     
     persona_list = [
         {"key": key, "name": config.get("name", key)}
@@ -312,7 +321,6 @@ def get_personas_endpoint():
 
 @app.route('/api/set_user_name', methods=['POST'])
 def set_user_name_endpoint():
-    """تنظیم نام کاربر و ریست کردن سشن برای اعمال در پرامپت."""
     
     data = request.get_json()
     user_name = data.get('user_name', '').strip()
@@ -341,7 +349,6 @@ def set_user_name_endpoint():
 
 @app.route('/api/set_persona', methods=['POST'])
 def set_persona_endpoint():
-    """تغییر شخصیت کاربر ثابت وب و ریست کردن سشن چت."""
     
     data = request.get_json()
     persona_key = data.get('persona_key')
@@ -396,6 +403,8 @@ def chat_endpoint():
         response = chat.send_message(user_message)
         bot_response = response.text
         
+        logger.info(f"⚡️ DEBUG: Chat message sent successfully. Preparing to save history.") # DEBUG
+        
         # 🚨 فراخوانی تابع ذخیره‌سازی تصحیح شده
         save_history_to_db(session_id, chat.get_history()) 
         
@@ -408,7 +417,7 @@ def chat_endpoint():
 
 @app.route('/')
 def serve_index():
-    """نمایش صفحه چت (index.html)"""
+# ... (بدون تغییر) ...
     try:
         return app.send_static_file('index.html') 
     except Exception:
