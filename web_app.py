@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با تفکیک سشن، حذف آیدی ثابت و رفع خطای session.sid)
+# web_app.py (نسخه نهایی با MongoDB Persistence برای Render)
 
 import os
 import logging
@@ -7,14 +7,16 @@ from typing import Dict, List, Optional, Any
 
 # --- 🚀 وابستگی‌های اضافی ---
 from dotenv import load_dotenv
-import uuid # 👈🏻 اضافه شد: برای ساخت Session ID یکتا
+import uuid 
+import pymongo # 👈🏻 اضافه شد
+from pymongo.errors import ConnectionFailure, OperationFailure
 
 # --- 🧠 وابستگی‌های جیمینای ---
 from google import genai
 from google.genai import types
 
 # --- 🌐 وابستگی‌های وب (مترجم) ---
-from flask import Flask, request, jsonify, session # 👈🏻 session حتماً باید ایمپورت شود
+from flask import Flask, request, jsonify, session 
 from flask_cors import CORS 
 
 # 👈🏻 لود کردن متغیرهای محیطی
@@ -30,12 +32,14 @@ logger = logging.getLogger(__name__)
 
 # --- 🔒 تنظیمات و توکن‌ها ---
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINIAPIKEY")
+MONGO_URI: Optional[str] = os.getenv("MONGO_URI") # 👈🏻 رشته اتصال MongoDB
 
+# --- 💾 تنظیمات MongoDB ---
+MONGO_CLIENT: Optional[pymongo.MongoClient] = None
+CONVERSATIONS_COLLECTION = None # کالکشن برای ذخیره سشن‌ها
 
 # --- ⚙️ تنظیمات کلی ربات (شخصیت‌های شما) ---
-# CONFIG_FILE و PERSONAS_FILE به دلیل حذف Persistence دیگر استفاده نمی‌شوند.
-
-# 🚨🚨🚨 لیست کامل شخصیت‌های شما (همان لیست ثابت)
+# (این بخش بدون تغییر از کد قبلی شما کپی شده است)
 DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
     "default": {
         "name": "دستیار حرفه‌ای (اطلس) 🤖",
@@ -103,10 +107,9 @@ DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
     },
 }
 
-# 👈🏻 پیکربندی‌ها مستقیماً از پیش‌فرض استفاده می‌شوند.
 persona_configs: Dict[str, Dict[str, str]] = DEFAULT_PERSONA_CONFIGS 
-# user_personas و user_names حذف شدند.
-chat_sessions: Dict[str, Any] = {} # 👈🏻 کلیدها از str (Session ID) هستند
+# سشن‌های Gemini فعال (در RAM)
+chat_sessions: Dict[str, Any] = {} 
 
 
 # --- 🧠 کلاس و توابع جیمینای ---
@@ -115,18 +118,20 @@ GEMINI_MODEL = 'gemini-2.5-flash'
 
 class GeminiClient:
     """کلاس Wrapper برای مدیریت کلاینت و سشن‌های چت Gemini."""
-    # ... (بدون تغییر) ...
+    
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key) 
         self._model_name = GEMINI_MODEL 
 
-    def create_chat(self, system_instruction: str):
+    def create_chat(self, system_instruction: str, history: List[types.Content] = None): # 👈🏻 اضافه شد: history
         config = types.GenerateContentConfig(
             system_instruction=system_instruction
         )
+        # سشن چت جدید با تزریق تاریخچه قبلی ساخته می‌شود
         return self.client.chats.create(
             model=self._model_name, 
-            config=config
+            config=config,
+            history=history or []
         )
         
     def get_model_name(self):
@@ -153,22 +158,97 @@ def get_gemini_client() -> Optional['GeminiClient']:
         logger.error(f"❌ Failed to initialize Gemini Client: {e}")
         return None
 
+# --- 💾 توابع مدیریت MongoDB ---
+
+def initialize_mongodb():
+    """راه‌اندازی اتصال به MongoDB و تعریف کالکشن."""
+    global MONGO_CLIENT, CONVERSATIONS_COLLECTION
+    
+    if MONGO_CLIENT is not None:
+        return
+        
+    if not MONGO_URI:
+        logger.error("❌ MONGO_URI not found. MongoDB client initialization skipped.")
+        return
+
+    try:
+        # اتصال به دیتابیس
+        MONGO_CLIENT = pymongo.MongoClient(MONGO_URI)
+        # تست اتصال
+        MONGO_CLIENT.admin.command('ping') 
+        # انتخاب دیتابیس (مثلاً gemini_chat_db)
+        MONGO_DB = MONGO_CLIENT.get_database("gemini_chat_db")
+        # انتخاب کالکشن (جدول)
+        CONVERSATIONS_COLLECTION = MONGO_DB.get_collection("conversations")
+        logger.info("✅ MongoDB connected successfully.")
+        
+        # ایجاد یکتا بودن برای Session ID
+        CONVERSATIONS_COLLECTION.create_index(
+            [("session_id", pymongo.ASCENDING)], 
+            unique=True
+        )
+        
+    except (ConnectionFailure, OperationFailure) as e:
+        logger.error(f"❌ Failed to initialize MongoDB Client (Connection/Operation Error): {e}")
+        MONGO_CLIENT = None
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize MongoDB Client: {e}")
+        MONGO_CLIENT = None
+
+def load_history_from_db(session_id: str) -> List[types.Content]:
+    """بازیابی تاریخچه مکالمات از MongoDB و تبدیل به فرمت Gemini."""
+    if CONVERSATIONS_COLLECTION is None:
+        return []
+    
+    try:
+        doc = CONVERSATIONS_COLLECTION.find_one({"session_id": session_id})
+        if doc and 'history' in doc:
+            # تبدیل دیکشنری‌های ذخیره شده به اشیاء Content جیمینای
+            history_list = []
+            for item in doc['history']:
+                # مطمئن می‌شویم که item['parts'] به درستی به لیست تبدیل شود
+                parts = [types.Part.from_dict(part) for part in item.get('parts', [])]
+                history_list.append(types.Content(role=item.get('role'), parts=parts))
+            
+            logger.info(f"Loaded {len(history_list)} items for session {session_id[:8]}...")
+            return history_list
+        
+    except Exception as e:
+        logger.error(f"Error loading history for {session_id[:8]}... from DB: {e}")
+        
+    return []
+
+def save_history_to_db(session_id: str, history: List[types.Content]):
+    """ذخیره تاریخچه مکالمات در MongoDB."""
+    if CONVERSATIONS_COLLECTION is None:
+        return
+        
+    try:
+        # تبدیل تاریخچه به فرمت ذخیره‌سازی (دیکشنری)
+        history_dicts = [item.to_dict() for item in history]
+        
+        # ذخیره یا به روز رسانی سند در دیتابیس
+        CONVERSATIONS_COLLECTION.update_one(
+            {"session_id": session_id},
+            {"$set": {"history": history_dicts}},
+            upsert=True # اگر وجود نداشت، بساز
+        )
+        logger.info(f"History saved for session {session_id[:8]}...")
+    except Exception as e:
+        logger.error(f"Error saving history for {session_id[:8]}... to DB: {e}")
+
+
 # --- 💾 توابع Session Management ---
 
 def get_session_id() -> str:
-    """Gets the unique session ID from the Flask session, creating it if necessary.
-    
-    NOTE: Using a custom key ('session_id') instead of session.sid to ensure 
-    compatibility with default Flask SecureCookieSession without external session managers.
-    """
+    """Gets the unique session ID from the Flask session, creating it if necessary."""
     if 'session_id' not in session:
-        # ساخت یک UUID یکتا برای این سشن و ذخیره آن
         session['session_id'] = str(uuid.uuid4())
     return session['session_id']
 
 
 def create_new_chat_session(session_id: str, current_persona_key: str, active_user_name: Optional[str]) -> Any:
-    """ساخت سشن چت جدید با دستورالعمل سیستم به‌روز شده."""
+    """ساخت سشن چت جدید با دستورالعمل سیستم به‌روز شده و تزریق تاریخچه از DB."""
     global GEMINI_CLIENT
 
     base_system_instruction = persona_configs.get(current_persona_key, persona_configs["default"])["prompt"]
@@ -181,13 +261,17 @@ def create_new_chat_session(session_id: str, current_persona_key: str, active_us
         )
     else:
         system_instruction = base_system_instruction
+        
+    # 2. 🚨 بازیابی تاریخچه از MongoDB
+    existing_history = load_history_from_db(session_id)
 
-    # 2. ساخت سشن جدید
+    # 3. ساخت سشن جدید
     chat = GEMINI_CLIENT.create_chat(
-        system_instruction=system_instruction
+        system_instruction=system_instruction,
+        history=existing_history # 👈🏻 تزریق تاریخچه
     )
     chat_sessions[session_id] = chat
-    logger.info(f"Chat session for {session_id[:8]}... created/reset. Persona: {current_persona_key}, Name: {active_user_name}")
+    logger.info(f"Chat session for {session_id[:8]}... created/reset. Persona: {current_persona_key}, Name: {active_user_name}. History size: {len(existing_history)}")
     return chat
     
     
@@ -200,9 +284,8 @@ def get_chat_session(session_id: str) -> Any:
     if not GEMINI_CLIENT:
         return None
         
-    # 👈🏻 اگر سشن موجود نیست، آن را می‌سازیم.
+    # 👈🏻 اگر سشن موجود نیست، آن را می‌سازیم (که شامل لود از DB هم می‌شود).
     if session_id not in chat_sessions:
-        # 👈🏻 بازیابی از session Flask
         current_persona_key = session.get("persona_key", "default") 
         active_user_name = session.get("user_name")
         return create_new_chat_session(session_id, current_persona_key, active_user_name)
@@ -219,11 +302,10 @@ app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app) 
 
 # 🚨🚨🚨 اضافه کردن SECRET_KEY برای کارکرد session 🚨🚨🚨
-# این کلید باید در محیط پروداکشن به صورت امن از متغیر محیطی خوانده شود.
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or 'a_very_secret_key_for_session_management_999'
 
 # --- 🟢 درگاه‌های انتخاب شخصیت و نام ---
-
+# (بدون تغییر)
 @app.route('/api/personas', methods=['GET'])
 def get_personas_endpoint():
     """برگرداندن لیست کلید و نام شخصیت‌ها برای نمایش در Dropdown."""
@@ -242,12 +324,12 @@ def set_user_name_endpoint():
     data = request.get_json()
     user_name = data.get('user_name', '').strip()
     
-    session_id = get_session_id() # ✅ استفاده از تابع کمکی جدید
+    session_id = get_session_id() 
 
     # 1. ذخیره نام جدید در session Flask
     session['user_name'] = user_name
     
-    # 2. ریست کردن سشن چت
+    # 2. ریست کردن سشن چت (نیاز به ساخت مجدد برای اعمال System Prompt جدید)
     if session_id in chat_sessions:
         del chat_sessions[session_id]
     
@@ -255,10 +337,12 @@ def set_user_name_endpoint():
     current_persona_key = session.get("persona_key", "default") 
     create_new_chat_session(session_id, current_persona_key, user_name)
     
+    # 4. 👈🏻 تاریخچه در دیتابیس حفظ می‌شود (نیازی به پاک کردن نیست)
+
     if user_name:
-        message = f"✅ نام شما با موفقیت به **{user_name}** ثبت شد. چت ریست شد."
+        message = f"✅ نام شما با موفقیت به **{user_name}** ثبت شد. چت ریست و سوابق قبلی بارگذاری شدند."
     else:
-        message = "✅ نام کاربر پاک شد. چت ریست شد."
+        message = "✅ نام کاربر پاک شد. چت ریست و سوابق قبلی بارگذاری شدند."
 
     return jsonify({
         'status': 'success',
@@ -276,7 +360,7 @@ def set_persona_endpoint():
     if not persona_key or persona_key not in persona_configs:
         return jsonify({'error': 'کلید شخصیت نامعتبر است.'}), 400
         
-    session_id = get_session_id() # ✅ استفاده از تابع کمکی جدید
+    session_id = get_session_id() 
     
     # 1. به‌روزرسانی شخصیت در session Flask
     session['persona_key'] = persona_key
@@ -291,9 +375,11 @@ def set_persona_endpoint():
         
     logger.info(f"Persona for web session ({session_id[:8]}...) set to: {persona_key}. Name: {active_user_name}")
     
+    # 4. 👈🏻 تاریخچه در دیتابیس حفظ می‌شود (نیازی به پاک کردن نیست)
+
     return jsonify({
         'status': 'success',
-        'message': f"شخصیت با موفقیت به **{persona_configs[persona_key].get('name', persona_key)}** تغییر کرد. چت ریست شد.",
+        'message': f"شخصیت با موفقیت به **{persona_configs[persona_key].get('name', persona_key)}** تغییر کرد. چت ریست و سوابق قبلی بارگذاری شدند.",
         'new_persona_name': persona_configs[persona_key].get('name', persona_key)
     })
 
@@ -312,17 +398,23 @@ def chat_endpoint():
     if not user_message:
         return jsonify({'response': 'لطفاً پیامی ارسال کنید.'}), 400
 
-    session_id = get_session_id() # ✅ استفاده از تابع کمکی جدید
+    session_id = get_session_id() 
     
     # 👈🏻 سشن چت مربوط به این session_id را می‌گیریم (یا می‌سازیم).
     chat = get_chat_session(session_id) 
     
     if not chat:
+        # اگر اتصال به Gemini یا Mongo شکست خورده باشد
+        if CONVERSATIONS_COLLECTION is None:
+            return jsonify({'response': '❌ خطای اتصال به دیتابیس/Gemini.'}), 500
         return jsonify({'response': '❌ خطای اتصال به Gemini.'}), 500
         
     try:
         response = chat.send_message(user_message)
         bot_response = response.text
+        
+        # 🚨 ذخیره تاریخچه به‌روز شده در MongoDB
+        save_history_to_db(session_id, chat.get_history()) 
         
         return jsonify({'response': bot_response})
         
@@ -343,4 +435,11 @@ def serve_index():
 # --- 🚀 تابع اصلی برای اجرا ---
 # -----------------------------------------------
 
-# نیازی به load_personas_from_file() نیست زیرا از DEFAULT_PERSONA_CONFIGS استفاده می‌کنیم.
+initialize_mongodb() # 👈🏻 اتصال به دیتابیس در ابتدای برنامه
+
+# (بقیه کد اجرا)
+if __name__ == '__main__':
+    # ... (کد اجرای لوکال) ...
+    port = int(os.environ.get('PORT', 5000))
+    # '0.0.0.0' برای کار کردن روی سرور (Render) لازم است
+    app.run(debug=False, host='0.0.0.0', port=port)
