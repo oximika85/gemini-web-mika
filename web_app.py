@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با MongoDB Persistence برای Render)
+# web_app.py (نسخه نهایی و تصحیح شده با MongoDB Persistence)
 
 import os
 import logging
@@ -39,7 +39,6 @@ MONGO_CLIENT: Optional[pymongo.MongoClient] = None
 CONVERSATIONS_COLLECTION = None # کالکشن برای ذخیره سشن‌ها
 
 # --- ⚙️ تنظیمات کلی ربات (شخصیت‌های شما) ---
-# (این بخش بدون تغییر از کد قبلی شما کپی شده است)
 DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
     "default": {
         "name": "دستیار حرفه‌ای (اطلس) 🤖",
@@ -108,7 +107,6 @@ DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
 }
 
 persona_configs: Dict[str, Dict[str, str]] = DEFAULT_PERSONA_CONFIGS 
-# سشن‌های Gemini فعال (در RAM)
 chat_sessions: Dict[str, Any] = {} 
 
 
@@ -123,7 +121,8 @@ class GeminiClient:
         self.client = genai.Client(api_key=api_key) 
         self._model_name = GEMINI_MODEL 
 
-    def create_chat(self, system_instruction: str, history: List[types.Content] = None): # 👈🏻 اضافه شد: history
+    # 👈🏻 تزریق تاریخچه به سشن چت در زمان ساخت
+    def create_chat(self, system_instruction: str, history: List[types.Content] = None): 
         config = types.GenerateContentConfig(
             system_instruction=system_instruction
         )
@@ -172,17 +171,12 @@ def initialize_mongodb():
         return
 
     try:
-        # اتصال به دیتابیس
         MONGO_CLIENT = pymongo.MongoClient(MONGO_URI)
-        # تست اتصال
         MONGO_CLIENT.admin.command('ping') 
-        # انتخاب دیتابیس (مثلاً gemini_chat_db)
         MONGO_DB = MONGO_CLIENT.get_database("gemini_chat_db")
-        # انتخاب کالکشن (جدول)
         CONVERSATIONS_COLLECTION = MONGO_DB.get_collection("conversations")
         logger.info("✅ MongoDB connected successfully.")
         
-        # ایجاد یکتا بودن برای Session ID
         CONVERSATIONS_COLLECTION.create_index(
             [("session_id", pymongo.ASCENDING)], 
             unique=True
@@ -203,12 +197,10 @@ def load_history_from_db(session_id: str) -> List[types.Content]:
     try:
         doc = CONVERSATIONS_COLLECTION.find_one({"session_id": session_id})
         if doc and 'history' in doc:
-            # تبدیل دیکشنری‌های ذخیره شده به اشیاء Content جیمینای
             history_list = []
             for item in doc['history']:
-                # مطمئن می‌شویم که item['parts'] به درستی به لیست تبدیل شود
-                parts = [types.Part.from_dict(part) for part in item.get('parts', [])]
-                history_list.append(types.Content(role=item.get('role'), parts=parts))
+                # تبدیل دیکشنری ذخیره شده به شی Content جیمینای
+                history_list.append(types.Content.from_dict(item))
             
             logger.info(f"Loaded {len(history_list)} items for session {session_id[:8]}...")
             return history_list
@@ -219,13 +211,17 @@ def load_history_from_db(session_id: str) -> List[types.Content]:
     return []
 
 def save_history_to_db(session_id: str, history: List[types.Content]):
-    """ذخیره تاریخچه مکالمات در MongoDB."""
+    """ذخیره تاریخچه مکالمات در MongoDB با رفع خطای Serialization."""
     if CONVERSATIONS_COLLECTION is None:
         return
         
     try:
-        # تبدیل تاریخچه به فرمت ذخیره‌سازی (دیکشنری)
-        history_dicts = [item.to_dict() for item in history]
+        # 🚨 رفع خطای: 'UserContent' object has no attribute 'to_dict'
+        # تبدیل Content objects به دیکشنری‌های قابل ذخیره
+        history_dicts = []
+        for item in history:
+            # مطمئن می‌شویم که item.to_dict() برای ذخیره کردن استفاده می‌شود
+            history_dicts.append(item.to_dict())
         
         # ذخیره یا به روز رسانی سند در دیتابیس
         CONVERSATIONS_COLLECTION.update_one(
@@ -301,7 +297,6 @@ def get_chat_session(session_id: str) -> Any:
 app = Flask(__name__, static_folder='.', static_url_path='') 
 CORS(app) 
 
-# 🚨🚨🚨 اضافه کردن SECRET_KEY برای کارکرد session 🚨🚨🚨
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or 'a_very_secret_key_for_session_management_999'
 
 # --- 🟢 درگاه‌های انتخاب شخصیت و نام ---
@@ -400,7 +395,6 @@ def chat_endpoint():
 
     session_id = get_session_id() 
     
-    # 👈🏻 سشن چت مربوط به این session_id را می‌گیریم (یا می‌سازیم).
     chat = get_chat_session(session_id) 
     
     if not chat:
@@ -437,9 +431,6 @@ def serve_index():
 
 initialize_mongodb() # 👈🏻 اتصال به دیتابیس در ابتدای برنامه
 
-# (بقیه کد اجرا)
 if __name__ == '__main__':
-    # ... (کد اجرای لوکال) ...
     port = int(os.environ.get('PORT', 5000))
-    # '0.0.0.0' برای کار کردن روی سرور (Render) لازم است
     app.run(debug=False, host='0.0.0.0', port=port)
