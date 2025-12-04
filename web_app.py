@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با MongoDB Persistence و رفع خطای 'to_dict' + کدهای دیباگ)
+# web_app.py (نسخه نهایی با MongoDB Persistence، رفع قطعی خطای UserContent و حذف لاگ‌های دیباگ)
 
 import os
 import logging
@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 # --- 🚀 وابستگی‌های اضافی ---
 from dotenv import load_dotenv
 import uuid 
-import pymongo # 👈🏻 برای اتصال به MongoDB
+import pymongo 
 from pymongo.errors import ConnectionFailure, OperationFailure
 
 # --- 🧠 وابستگی‌های جیمینای ---
@@ -23,21 +23,20 @@ from flask_cors import CORS
 load_dotenv()
 
 # --- 📝 تنظیمات لاگ‌گیری ---
-# 🚨 سطح لاگ‌گیری را روی INFO می‌گذاریم تا پیام‌های دیباگ جدید (با تگ ⚡️ DEBUG) در Render دیده شوند.
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO 
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
 
 # --- 🔒 تنظیمات و توکن‌ها ---
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINIAPIKEY")
-MONGO_URI: Optional[str] = os.getenv("MONGO_URI") # 👈🏻 رشته اتصال MongoDB
+MONGO_URI: Optional[str] = os.getenv("MONGO_URI") 
 
 # --- 💾 تنظیمات MongoDB ---
 MONGO_CLIENT: Optional[pymongo.MongoClient] = None
-CONVERSATIONS_COLLECTION = None # کالکشن برای ذخیره سشن‌ها
+CONVERSATIONS_COLLECTION = None 
 
 # --- ⚙️ تنظیمات کلی ربات (شخصیت‌های شما) ---
 DEFAULT_PERSONA_CONFIGS: Dict[str, Dict[str, str]] = {
@@ -162,8 +161,6 @@ def initialize_mongodb():
     """راه‌اندازی اتصال به MongoDB و تعریف کالکشن."""
     global MONGO_CLIENT, CONVERSATIONS_COLLECTION
     
-    logger.info("⚡️ DEBUG: Starting MongoDB initialization...") # DEBUG
-    
     if MONGO_CLIENT is not None:
         return
         
@@ -212,46 +209,63 @@ def load_history_from_db(session_id: str) -> List[types.Content]:
     return []
 
 def save_history_to_db(session_id: str, history: List[types.Content]):
-    """ذخیره تاریخچه مکالمات در MongoDB با رفع خطای Serialization."""
+    """
+    ذخیره تاریخچه مکالمات در MongoDB.
+    شامل منطق شرطی برای دور زدن خطای 'UserContent' object has no attribute 'to_dict'.
+    """
     if CONVERSATIONS_COLLECTION is None:
         return
-        
-    logger.info(f"⚡️ DEBUG: Starting save for session {session_id[:8]}... History length: {len(history)}") # DEBUG
         
     try:
         history_dicts = []
         
-        # 🚨 این حلقه محل اصلی خطا است، بنابراین با دقت دیباگ می‌شود.
-        for i, item in enumerate(history):
-            logger.info(f"⚡️ DEBUG: Converting item {i} of type {type(item)}...") # DEBUG
+        for item in history:
             
-            # تبدیل به دیکشنری. اگر خطا اینجا رخ دهد، می‌دانیم که item.to_dict مشکل دارد.
-            history_dicts.append(item.to_dict()) 
-            
-        logger.info(f"⚡️ DEBUG: Conversion complete. Final dicts size: {len(history_dicts)}") # DEBUG
-            
+            # 🚨 منطق اصلی برای رفع خطا: بررسی وجود متد to_dict
+            if hasattr(item, 'to_dict'):
+                # روش استاندارد برای Content و زیرکلاس‌های سازگار
+                history_dicts.append(item.to_dict())
+                
+            elif hasattr(item, 'parts') and hasattr(item, 'role'):
+                # روش دستی برای زیرکلاس‌هایی مانند UserContent که to_dict را ندارند
+                
+                parts_dicts = []
+                for part in item.parts:
+                    if hasattr(part, 'to_dict'):
+                         parts_dicts.append(part.to_dict())
+                    else:
+                        # فال‌بک امن برای Part objects (معمولا شامل یک فیلد text هستند)
+                        parts_dicts.append({"text": getattr(part, 'text', '')})
+
+                history_dicts.append({
+                    "role": item.role,
+                    "parts": parts_dicts,
+                })
+            else:
+                 logger.warning(f"⚠️ WARNING: Skipped item of unknown type {type(item)} during serialization.")
+
         # ذخیره یا به روز رسانی سند در دیتابیس
         CONVERSATIONS_COLLECTION.update_one(
             {"session_id": session_id},
             {"$set": {"history": history_dicts}},
-            upsert=True # اگر وجود نداشت، بساز
+            upsert=True 
         )
         logger.info(f"✅ History saved for session {session_id[:8]}...")
     except Exception as e:
-        # اگر خطا اینجا رخ دهد، دقیقا می‌فهمیم کجای حلقه بوده است و نوع آخرین آبجکت تلاش‌شده را می‌بینیم.
-        logger.error(f"❌ Error saving history for {session_id[:8]}... to DB: {e}. Last item type tried: {type(item)}") # DEBUG with error context
+        # نمایش خطای عمومی اگر خطا در تبدیل یا ذخیره سازی رخ دهد
+        logger.error(f"❌ Critical Error saving history for {session_id[:8]}... to DB: {e}")
 
 # --- 💾 توابع Session Management ---
 
 def get_session_id() -> str:
-# ... (بدون تغییر) ...
+    """Gets the unique session ID from the Flask session, creating it if necessary."""
     if 'session_id' not in session:
         session['session_id'] = str(uuid.uuid4())
     return session['session_id']
 
 
 def create_new_chat_session(session_id: str, current_persona_key: str, active_user_name: Optional[str]) -> Any:
-# ... (بدون تغییر) ...
+    """ساخت سشن چت جدید با دستورالعمل سیستم به‌روز شده و تزریق تاریخچه از DB."""
     global GEMINI_CLIENT
 
     base_system_instruction = persona_configs.get(current_persona_key, persona_configs["default"])["prompt"]
@@ -271,7 +285,7 @@ def create_new_chat_session(session_id: str, current_persona_key: str, active_us
     # 3. ساخت سشن جدید
     chat = GEMINI_CLIENT.create_chat(
         system_instruction=system_instruction,
-        history=existing_history # 👈🏻 تزریق تاریخچه
+        history=existing_history 
     )
     chat_sessions[session_id] = chat
     logger.info(f"Chat session for {session_id[:8]}... created/reset. Persona: {current_persona_key}, Name: {active_user_name}. History size: {len(existing_history)}")
@@ -279,7 +293,7 @@ def create_new_chat_session(session_id: str, current_persona_key: str, active_us
     
     
 def get_chat_session(session_id: str) -> Any: 
-# ... (بدون تغییر) ...
+    """برگرداندن سشن چت موجود یا ساختن سشن جدید در صورت عدم وجود."""
     global GEMINI_CLIENT
     if GEMINI_CLIENT is None:
         GEMINI_CLIENT = get_gemini_client()
@@ -287,13 +301,11 @@ def get_chat_session(session_id: str) -> Any:
     if not GEMINI_CLIENT:
         return None
         
-    # 👈🏻 اگر سشن موجود نیست، آن را می‌سازیم (که شامل لود از DB هم می‌شود).
     if session_id not in chat_sessions:
         current_persona_key = session.get("persona_key", "default") 
         active_user_name = session.get("user_name")
         return create_new_chat_session(session_id, current_persona_key, active_user_name)
         
-    # در غیر این صورت، سشن موجود را برمی‌گردانیم.
     return chat_sessions[session_id]
 
 
@@ -304,13 +316,13 @@ def get_chat_session(session_id: str) -> Any:
 app = Flask(__name__, static_folder='.', static_url_path='') 
 CORS(app) 
 
-# 🚨🚨🚨 اطمینان حاصل کنید که این متغیر در Render ست شده است!
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or 'a_very_secret_key_for_session_management_999'
 
 # --- 🟢 درگاه‌های انتخاب شخصیت و نام ---
-# ... (بدون تغییر) ...
+
 @app.route('/api/personas', methods=['GET'])
 def get_personas_endpoint():
+    """برگرداندن لیست کلید و نام شخصیت‌ها برای نمایش در Dropdown."""
     
     persona_list = [
         {"key": key, "name": config.get("name", key)}
@@ -321,6 +333,7 @@ def get_personas_endpoint():
 
 @app.route('/api/set_user_name', methods=['POST'])
 def set_user_name_endpoint():
+    """تنظیم نام کاربر و ریست کردن سشن برای اعمال در پرامپت."""
     
     data = request.get_json()
     user_name = data.get('user_name', '').strip()
@@ -349,6 +362,7 @@ def set_user_name_endpoint():
 
 @app.route('/api/set_persona', methods=['POST'])
 def set_persona_endpoint():
+    """تغییر شخصیت کاربر ثابت وب و ریست کردن سشن چت."""
     
     data = request.get_json()
     persona_key = data.get('persona_key')
@@ -394,7 +408,6 @@ def chat_endpoint():
     chat = get_chat_session(session_id) 
     
     if not chat:
-        # اگر اتصال به Gemini یا Mongo شکست خورده باشد
         if CONVERSATIONS_COLLECTION is None:
             return jsonify({'response': '❌ خطای اتصال به دیتابیس/Gemini.'}), 500
         return jsonify({'response': '❌ خطای اتصال به Gemini.'}), 500
@@ -402,8 +415,6 @@ def chat_endpoint():
     try:
         response = chat.send_message(user_message)
         bot_response = response.text
-        
-        logger.info(f"⚡️ DEBUG: Chat message sent successfully. Preparing to save history.") # DEBUG
         
         # 🚨 فراخوانی تابع ذخیره‌سازی تصحیح شده
         save_history_to_db(session_id, chat.get_history()) 
@@ -417,7 +428,7 @@ def chat_endpoint():
 
 @app.route('/')
 def serve_index():
-# ... (بدون تغییر) ...
+    """نمایش صفحه چت (index.html)"""
     try:
         return app.send_static_file('index.html') 
     except Exception:
