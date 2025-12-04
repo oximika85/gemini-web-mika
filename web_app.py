@@ -1,4 +1,4 @@
-# web_app.py (نسخه نهایی با MongoDB Persistence، رفع قطعی خطای UserContent و حذف لاگ‌های دیباگ)
+# web_app.py (نسخه نهایی با MongoDB Persistence و تضمین ذخیره‌سازی متن)
 
 import os
 import logging
@@ -211,7 +211,7 @@ def load_history_from_db(session_id: str) -> List[types.Content]:
 def save_history_to_db(session_id: str, history: List[types.Content]):
     """
     ذخیره تاریخچه مکالمات در MongoDB.
-    شامل منطق شرطی برای دور زدن خطای 'UserContent' object has no attribute 'to_dict'.
+    شامل منطق شرطی برای دور زدن خطای 'UserContent' object has no attribute 'to_dict' و تضمین ذخیره متن.
     """
     if CONVERSATIONS_COLLECTION is None:
         return
@@ -221,21 +221,23 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
         
         for item in history:
             
-            # 🚨 منطق اصلی برای رفع خطا: بررسی وجود متد to_dict
+            # 1. روش استاندارد: بررسی وجود متد to_dict
             if hasattr(item, 'to_dict'):
-                # روش استاندارد برای Content و زیرکلاس‌های سازگار
                 history_dicts.append(item.to_dict())
                 
+            # 2. روش دستی برای UserContent و ModelContent (که to_dict ندارند یا متنش خالی ذخیره می‌شود)
             elif hasattr(item, 'parts') and hasattr(item, 'role'):
-                # روش دستی برای زیرکلاس‌هایی مانند UserContent که to_dict را ندارند
                 
                 parts_dicts = []
                 for part in item.parts:
+                    # تضمین می‌کنیم که اگر to_dict روی part شکست خورد، حداقل متن آن را بخوانیم.
                     if hasattr(part, 'to_dict'):
                          parts_dicts.append(part.to_dict())
+                    elif hasattr(part, 'text'):
+                         # 🚨 این خط تضمین می‌کند که متن را مستقیماً از Part object بخواند.
+                         parts_dicts.append({"text": part.text})
                     else:
-                        # فال‌بک امن برای Part objects (معمولا شامل یک فیلد text هستند)
-                        parts_dicts.append({"text": getattr(part, 'text', '')})
+                         parts_dicts.append({"text": "Error: Could not serialize part content."})
 
                 history_dicts.append({
                     "role": item.role,
@@ -252,7 +254,6 @@ def save_history_to_db(session_id: str, history: List[types.Content]):
         )
         logger.info(f"✅ History saved for session {session_id[:8]}...")
     except Exception as e:
-        # نمایش خطای عمومی اگر خطا در تبدیل یا ذخیره سازی رخ دهد
         logger.error(f"❌ Critical Error saving history for {session_id[:8]}... to DB: {e}")
 
 # --- 💾 توابع Session Management ---
